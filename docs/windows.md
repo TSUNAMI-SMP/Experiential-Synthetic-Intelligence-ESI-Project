@@ -15,6 +15,8 @@ Python 3.12 を入れ、プロジェクトのルートで PowerShell を開き�
 
 インストーラーはハッシュ付きの依存ロックを使用します。プラットフォームに合う wheel がない場合は、検証を無効にせず具体的なパッケージの対応版を別の開発作業で確認してください。モデル導入は公式の固定リビジョンから取得し、ASR 約484MB、Qwen Q4_K_M 約2.5GB、凛音エル AIVMX 約253MB の SHA-256 を照合します。
 
+旧版で `colorama>=0.4` の固定版・ハッシュ不足が表示された場合は、GitHub の最新版の `requirements.lock` に差し替えて、同じインストーラーを再実行してください。Windows が必要とする colorama 0.4.6 を公式 PyPI のハッシュ付きで追加しました。Windows / Python 3.12 を対象にした依存関係の解決は確認済みですが、Windows 上の実インストール完了は別の確認です。
+
 ## llama.cpp と AivisSpeech
 
 1. [llama.cpp 公式リリース](https://github.com/ggml-org/llama.cpp/releases)から Windows x64 / RTX 5060 に対応する CUDA 版を入れます。クラウド検証版は b11429 です。公式チェックサムを照合し、GPU 対応の NVIDIA ドライバーを使用してください。CPU 版が起動することだけで GPU 動作済みとは判断しません。
