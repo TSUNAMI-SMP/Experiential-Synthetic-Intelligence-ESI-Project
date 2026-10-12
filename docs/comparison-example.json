@@ -1,0 +1,280 @@
+{
+  "release": "ESI-01",
+  "created": "2026-10-12T21:49:11.391960+00:00",
+  "task": "arbitrary-cue-v1",
+  "seed": 1,
+  "training_trials_per_condition": 80,
+  "training_cues": [
+    -1,
+    1
+  ],
+  "heldout_cues": [
+    -0.85,
+    -0.65,
+    -0.35,
+    0.35,
+    0.65,
+    0.85
+  ],
+  "conditions": {
+    "learning": {
+      "baseline": {
+        "mse": 0.13010000000000002,
+        "choice_accuracy": 0.5,
+        "trials": 6,
+        "answers": "measurement pathway, not autonomous choices",
+        "updated": false,
+        "short_term_state_used": true,
+        "long_term_state_written_back": false
+      },
+      "heldout": {
+        "mse": 5.022141504923646e-05,
+        "choice_accuracy": 1.0,
+        "trials": 6,
+        "answers": "measurement pathway, not autonomous choices",
+        "updated": false,
+        "short_term_state_used": true,
+        "long_term_state_written_back": false
+      },
+      "curve": [
+        {
+          "training_trials": 8,
+          "mse": 0.002986243541926281,
+          "choice_accuracy": 1.0,
+          "trials": 6,
+          "answers": "measurement pathway, not autonomous choices",
+          "updated": false,
+          "short_term_state_used": true,
+          "long_term_state_written_back": false
+        },
+        {
+          "training_trials": 16,
+          "mse": 0.0010841588060988938,
+          "choice_accuracy": 1.0,
+          "trials": 6,
+          "answers": "measurement pathway, not autonomous choices",
+          "updated": false,
+          "short_term_state_used": true,
+          "long_term_state_written_back": false
+        },
+        {
+          "training_trials": 24,
+          "mse": 0.000518585933910164,
+          "choice_accuracy": 1.0,
+          "trials": 6,
+          "answers": "measurement pathway, not autonomous choices",
+          "updated": false,
+          "short_term_state_used": true,
+          "long_term_state_written_back": false
+        },
+        {
+          "training_trials": 32,
+          "mse": 0.0003158067705041707,
+          "choice_accuracy": 1.0,
+          "trials": 6,
+          "answers": "measurement pathway, not autonomous choices",
+          "updated": false,
+          "short_term_state_used": true,
+          "long_term_state_written_back": false
+        },
+        {
+          "training_trials": 40,
+          "mse": 0.00021620877059469286,
+          "choice_accuracy": 1.0,
+          "trials": 6,
+          "answers": "measurement pathway, not autonomous choices",
+          "updated": false,
+          "short_term_state_used": true,
+          "long_term_state_written_back": false
+        },
+        {
+          "training_trials": 48,
+          "mse": 0.00015503336385548782,
+          "choice_accuracy": 1.0,
+          "trials": 6,
+          "answers": "measurement pathway, not autonomous choices",
+          "updated": false,
+          "short_term_state_used": true,
+          "long_term_state_written_back": false
+        },
+        {
+          "training_trials": 56,
+          "mse": 0.00011433197738731866,
+          "choice_accuracy": 1.0,
+          "trials": 6,
+          "answers": "measurement pathway, not autonomous choices",
+          "updated": false,
+          "short_term_state_used": true,
+          "long_term_state_written_back": false
+        },
+        {
+          "training_trials": 64,
+          "mse": 8.537062688275072e-05,
+          "choice_accuracy": 1.0,
+          "trials": 6,
+          "answers": "measurement pathway, not autonomous choices",
+          "updated": false,
+          "short_term_state_used": true,
+          "long_term_state_written_back": false
+        },
+        {
+          "training_trials": 72,
+          "mse": 6.466138150330656e-05,
+          "choice_accuracy": 1.0,
+          "trials": 6,
+          "answers": "measurement pathway, not autonomous choices",
+          "updated": false,
+          "short_term_state_used": true,
+          "long_term_state_written_back": false
+        },
+        {
+          "training_trials": 80,
+          "mse": 5.022141504923646e-05,
+          "choice_accuracy": 1.0,
+          "trials": 6,
+          "answers": "measurement pathway, not autonomous choices",
+          "updated": false,
+          "short_term_state_used": true,
+          "long_term_state_written_back": false
+        }
+      ],
+      "weights_changed": true,
+      "observed_components": [
+        "pseudo_state_recovery",
+        "experiment_evidence"
+      ],
+      "progress_teacher": "none",
+      "model": "action-specific masked ridge RLS"
+    },
+    "frozen": {
+      "baseline": {
+        "mse": 0.13010000000000002,
+        "choice_accuracy": 0.5,
+        "trials": 6,
+        "answers": "measurement pathway, not autonomous choices",
+        "updated": false,
+        "short_term_state_used": true,
+        "long_term_state_written_back": false
+      },
+      "heldout": {
+        "mse": 0.13010000000000002,
+        "choice_accuracy": 0.5,
+        "trials": 6,
+        "answers": "measurement pathway, not autonomous choices",
+        "updated": false,
+        "short_term_state_used": true,
+        "long_term_state_written_back": false
+      },
+      "curve": [
+        {
+          "training_trials": 8,
+          "mse": 0.13010000000000002,
+          "choice_accuracy": 0.5,
+          "trials": 6,
+          "answers": "measurement pathway, not autonomous choices",
+          "updated": false,
+          "short_term_state_used": true,
+          "long_term_state_written_back": false
+        },
+        {
+          "training_trials": 16,
+          "mse": 0.13010000000000002,
+          "choice_accuracy": 0.5,
+          "trials": 6,
+          "answers": "measurement pathway, not autonomous choices",
+          "updated": false,
+          "short_term_state_used": true,
+          "long_term_state_written_back": false
+        },
+        {
+          "training_trials": 24,
+          "mse": 0.13010000000000002,
+          "choice_accuracy": 0.5,
+          "trials": 6,
+          "answers": "measurement pathway, not autonomous choices",
+          "updated": false,
+          "short_term_state_used": true,
+          "long_term_state_written_back": false
+        },
+        {
+          "training_trials": 32,
+          "mse": 0.13010000000000002,
+          "choice_accuracy": 0.5,
+          "trials": 6,
+          "answers": "measurement pathway, not autonomous choices",
+          "updated": false,
+          "short_term_state_used": true,
+          "long_term_state_written_back": false
+        },
+        {
+          "training_trials": 40,
+          "mse": 0.13010000000000002,
+          "choice_accuracy": 0.5,
+          "trials": 6,
+          "answers": "measurement pathway, not autonomous choices",
+          "updated": false,
+          "short_term_state_used": true,
+          "long_term_state_written_back": false
+        },
+        {
+          "training_trials": 48,
+          "mse": 0.13010000000000002,
+          "choice_accuracy": 0.5,
+          "trials": 6,
+          "answers": "measurement pathway, not autonomous choices",
+          "updated": false,
+          "short_term_state_used": true,
+          "long_term_state_written_back": false
+        },
+        {
+          "training_trials": 56,
+          "mse": 0.13010000000000002,
+          "choice_accuracy": 0.5,
+          "trials": 6,
+          "answers": "measurement pathway, not autonomous choices",
+          "updated": false,
+          "short_term_state_used": true,
+          "long_term_state_written_back": false
+        },
+        {
+          "training_trials": 64,
+          "mse": 0.13010000000000002,
+          "choice_accuracy": 0.5,
+          "trials": 6,
+          "answers": "measurement pathway, not autonomous choices",
+          "updated": false,
+          "short_term_state_used": true,
+          "long_term_state_written_back": false
+        },
+        {
+          "training_trials": 72,
+          "mse": 0.13010000000000002,
+          "choice_accuracy": 0.5,
+          "trials": 6,
+          "answers": "measurement pathway, not autonomous choices",
+          "updated": false,
+          "short_term_state_used": true,
+          "long_term_state_written_back": false
+        },
+        {
+          "training_trials": 80,
+          "mse": 0.13010000000000002,
+          "choice_accuracy": 0.5,
+          "trials": 6,
+          "answers": "measurement pathway, not autonomous choices",
+          "updated": false,
+          "short_term_state_used": true,
+          "long_term_state_written_back": false
+        }
+      ],
+      "weights_changed": false,
+      "observed_components": [
+        "pseudo_state_recovery",
+        "experiment_evidence"
+      ],
+      "progress_teacher": "none",
+      "model": "action-specific masked ridge RLS"
+    }
+  },
+  "interpretation": "Controlled prediction learning; not an IQ, consciousness or free-conversation measurement"
+}

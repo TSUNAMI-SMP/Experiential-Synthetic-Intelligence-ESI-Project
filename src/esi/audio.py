@@ -1,0 +1,355 @@
+"""CPU perception. Audio callbacks only copy into a bounded queue."""
+
+import hashlib
+import math
+import queue
+import threading
+import time
+from collections import deque
+from pathlib import Path
+
+import numpy as np
+import soundfile as sf
+from scipy.signal import correlate, find_peaks, resample_poly
+
+from esi.models import AcousticFrame, Observation, Settings, Source, uid, utc
+
+RATE = 16000
+FRAME = 512
+
+
+def mono16(audio, sample_rate):
+    audio = np.asarray(audio, dtype=np.float32)
+    if audio.ndim == 2:
+        audio = audio.mean(axis=1)
+    if audio.ndim != 1 or not np.isfinite(audio).all() or sample_rate <= 0:
+        raise ValueError("Invalid audio samples/rate")
+    if sample_rate != RATE:
+        divisor = math.gcd(int(sample_rate), RATE)
+        audio = resample_poly(audio, RATE // divisor, int(sample_rate) // divisor).astype(np.float32)
+    return np.ascontiguousarray(audio)
+
+
+def acoustics(audio, baseline=None):
+    frames = []
+    for offset in range(0, len(audio), FRAME):
+        chunk = audio[offset : offset + FRAME].astype(float)
+        rms = float(np.sqrt(np.mean(chunk * chunk))) if len(chunk) else 0.0
+        f0 = None
+        centered = chunk - np.mean(chunk)
+        if rms > 0.002 and len(chunk) >= FRAME:
+            corr = correlate(centered, centered, mode="full", method="fft")[len(chunk) - 1 :]
+            peaks, _ = find_peaks(corr[RATE // 400 : RATE // 65])
+            if len(peaks) and corr[0] > 0:
+                lag = int(peaks[np.argmax(corr[peaks + RATE // 400])] + RATE // 400)
+                if corr[lag] / corr[0] > 0.5:
+                    f0 = RATE / lag
+        frames.append(
+            AcousticFrame(
+                seconds=offset / RATE,
+                rms=rms,
+                normalized_rms=rms / max(baseline, 0.00001) if baseline else None,
+                f0_hz=f0,
+                voiced=f0 is not None,
+            )
+        )
+    pitches = [f.f0_hz for f in frames if f.f0_hz is not None]
+    summary = {
+        "rms": float(np.sqrt(np.mean(audio * audio))) if len(audio) else 0.0,
+        "f0_hz": float(np.median(pitches)) if pitches else None,
+        "voiced_fraction": sum(f.voiced for f in frames) / max(1, len(frames)),
+    }
+    return frames, summary
+
+
+class Perception:
+    def __init__(self, settings: Settings, audio_directory):
+        self.settings = settings
+        self.directory = Path(audio_directory)
+        self.directory.mkdir(parents=True, exist_ok=True)
+        self.model = None
+        self.model_sha256 = None
+        self.lock = threading.Lock()
+        self.baseline = None
+
+    def recognize(self, audio, source=Source.RECORDING, metadata=None, mono_start=None, wall_start=None):
+        from faster_whisper import WhisperModel
+
+        audio = np.asarray(audio, dtype=np.float32)
+        if len(audio) == 0:
+            raise ValueError("Empty speech segment")
+        metadata = dict(metadata or {})
+        duration = len(audio) / RATE
+        started = time.monotonic() if mono_start is None else mono_start
+        with self.lock:
+            if self.model is None:
+                if not Path(self.settings.asr_model_path, "model.bin").is_file():
+                    raise FileNotFoundError(
+                        "ASR model missing; configure a local faster-whisper small multilingual directory"
+                    )
+                with Path(self.settings.asr_model_path, "model.bin").open("rb") as source_file:
+                    self.model_sha256 = hashlib.file_digest(source_file, "sha256").hexdigest()
+                self.model = WhisperModel(
+                    self.settings.asr_model_path,
+                    device="cpu",
+                    compute_type="int8",
+                    cpu_threads=self.settings.cpu_threads,
+                    num_workers=1,
+                    local_files_only=True,
+                )
+            segments, info = self.model.transcribe(audio, language="ja", beam_size=1, vad_filter=False)
+            segments = list(segments)
+            rms = float(np.sqrt(np.mean(audio * audio)))
+            baseline = self.baseline
+            self.baseline = rms if baseline is None else 0.9 * baseline + 0.1 * rms
+        text = "".join(s.text for s in segments).strip()
+        frames, summary = acoustics(audio, baseline)
+        summary["characters_per_second_estimate"] = len(text) / duration
+        saved_bytes = sum(p.stat().st_size for p in self.directory.glob("*.wav"))
+        if saved_bytes + len(audio) * 2 + 256 > self.settings.audio_limit_bytes:
+            raise RuntimeError(
+                "Audio retention quota reached; archive recordings using researcher controls before continuing"
+            )
+        eid = uid()
+        path = self.directory / f"{eid}.wav"
+        sf.write(path, audio, RATE, subtype="PCM_16")
+        metadata.update(
+            {
+                "recognition_sample_rate": RATE,
+                "asr_segments": [
+                    {
+                        "start": s.start,
+                        "end": s.end,
+                        "text": s.text,
+                        "avg_logprob": s.avg_logprob,
+                        "no_speech_prob": s.no_speech_prob,
+                    }
+                    for s in segments
+                ],
+                "audio_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "confidence_calibrated": False,
+                "asr_model_sha256": self.model_sha256,
+                "asr_device": "cpu",
+                "asr_compute_type": "int8",
+            }
+        )
+        return Observation(
+            event_id=eid,
+            source=source,
+            mono_start=started,
+            mono_end=started + duration,
+            wall_start=wall_start or utc(),
+            wall_end=utc(),
+            duration=duration,
+            text=text,
+            audio_ref=str(path.resolve()),
+            acoustic_frames=frames,
+            acoustic_summary=summary,
+            category="speech",
+            missing=["f0"] if not any(f.voiced for f in frames) else [],
+            estimators={
+                "asr": "faster-whisper-1.2.1/small multilingual",
+                "acoustics": "ESI-01/autocorrelation-v1",
+            },
+            estimates={"language_probability_uncalibrated": info.language_probability},
+            metadata=metadata,
+        )
+
+    def recording(self, filename):
+        from faster_whisper.vad import VadOptions, get_speech_timestamps
+
+        info = sf.info(filename)
+        if info.duration > self.settings.recording_max_seconds:
+            raise ValueError("Recording exceeds the configured duration limit; split it before importing")
+        original, sr = sf.read(filename, dtype="float32", always_2d=True)
+        audio = mono16(original, sr)
+        regions = get_speech_timestamps(
+            audio,
+            VadOptions(
+                min_silence_duration_ms=self.settings.vad_end_ms,
+                max_speech_duration_s=self.settings.utterance_max_seconds,
+                speech_pad_ms=100,
+            ),
+        )
+        recording_id = uid()
+        mono_start, wall_start = time.monotonic(), utc()
+        for index, region in enumerate(regions):
+            yield self.recognize(
+                audio[region["start"] : region["end"]],
+                metadata={
+                    "recording_id": recording_id,
+                    "segment_index": index,
+                    "original_path": str(Path(filename).resolve()),
+                    "original_sample_rate": sr,
+                    "original_channels": original.shape[1],
+                    "recording_start_seconds": region["start"] / RATE,
+                    "recording_end_seconds": region["end"] / RATE,
+                    "vad": "Silero v6 ONNX",
+                    "is_recording_playback": True,
+                },
+                mono_start=mono_start + region["start"] / RATE,
+                wall_start=wall_start,
+            )
+
+
+class Segmenter:
+    """Streaming Silero v6 ONNX state; 32ms frames, bounded pre-roll and utterances."""
+
+    def __init__(self, settings):
+        from faster_whisper.vad import get_vad_model
+
+        self.session = get_vad_model().session
+        self.settings = settings
+        self.h = np.zeros((1, 1, 128), dtype="float32")
+        self.c = self.h.copy()
+        self.context = np.zeros(64, dtype="float32")
+        self.preroll = deque(maxlen=6)
+        self.frames = []
+        self.silent = 0
+        self.utterance_id = None
+
+    def feed(self, frame):
+        frame = np.asarray(frame, dtype=np.float32)
+        if frame.shape != (FRAME,):
+            raise ValueError("VAD requires 512-sample frames")
+        combined = np.concatenate((self.context, frame))[None]
+        output, self.h, self.c = self.session.run(None, {"input": combined, "h": self.h, "c": self.c})
+        probability = float(np.asarray(output).reshape(-1)[0])
+        self.context = frame[-64:].copy()
+        speech = probability >= 0.5
+        if speech and not self.frames:
+            self.frames = list(self.preroll)
+            self.utterance_id = self.utterance_id or uid()
+        if self.frames:
+            self.frames.append(frame.copy())
+            self.silent = 0 if speech else self.silent + FRAME
+            maxed = len(self.frames) * FRAME / RATE >= self.settings.utterance_max_seconds
+            ended = self.silent / RATE * 1000 >= self.settings.vad_end_ms
+            if maxed or ended:
+                result = (np.concatenate(self.frames), self.utterance_id, maxed and not ended)
+                self.frames, self.silent = [], 0
+                if ended:
+                    self.utterance_id = None
+                self.preroll.clear()
+                return result
+        else:
+            self.preroll.append(frame.copy())
+        return None
+
+
+class Microphone:
+    def __init__(self, perception, on_event, on_status, output_active=lambda: False, device=None):
+        self.perception, self.on_event, self.on_status = perception, on_event, on_status
+        self.output_active, self.device = output_active, device
+        self.queue = queue.Queue(maxsize=perception.settings.audio_queue_capacity)
+        self.segments = queue.Queue(maxsize=4)
+        self.stop_event = threading.Event()
+        self.stream = None
+        self.thread = None
+        self.asr_thread = None
+        self.dropped = 0
+
+    def _callback(self, data, frames, timing, status):
+        # No model calls, database I/O or GUI operations in PortAudio callback.
+        try:
+            self.queue.put_nowait(
+                (data[:, 0].copy(), time.monotonic(), utc(), bool(status), self.output_active())
+            )
+        except queue.Full:
+            self.dropped += 1
+
+    def _worker(self):
+        segmenter = self.segmenter
+        started, wall, contaminated = None, None, False
+        while not self.stop_event.is_set():
+            try:
+                frame, mono, stamp, overflow, own_output = self.queue.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            if started is None:
+                started, wall = mono, stamp
+            contaminated |= own_output
+            if overflow or self.dropped:
+                self.on_status(
+                    "microphone",
+                    f"overflow: {self.dropped} dropped frames; interval unsuitable for clean experiments",
+                )
+                self.dropped = 0
+            try:
+                ready = segmenter.feed(frame)
+                if ready:
+                    audio, utterance_id, continues = ready
+                    try:
+                        self.segments.put_nowait(
+                            (
+                                audio,
+                                {
+                                    "utterance_id": utterance_id,
+                                    "continues": continues,
+                                    "tts_contamination_possible": contaminated,
+                                    "echo_cancellation": "not_implemented",
+                                    "original_sample_rate": RATE,
+                                },
+                                mono - len(audio) / RATE + FRAME / RATE,
+                                wall,
+                            )
+                        )
+                    except queue.Full:
+                        self.on_status("asr", "overflow: speech interval dropped; bounded ASR queue full")
+                    started, wall, contaminated = None, None, False
+                elif not segmenter.frames:
+                    started, wall, contaminated = None, None, False
+            except Exception as exc:
+                self.on_status("vad", f"failed: {type(exc).__name__}: {exc}")
+
+    def _asr_worker(self):
+        parent = {}
+        while not self.stop_event.is_set():
+            try:
+                audio, metadata, started, wall = self.segments.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            try:
+                key = metadata["utterance_id"]
+                metadata["parent_event_id"] = parent.get(key)
+                event = self.perception.recognize(
+                    audio, Source.MICROPHONE, metadata=metadata, mono_start=started, wall_start=wall
+                )
+                if metadata["continues"]:
+                    parent[key] = event.event_id
+                else:
+                    parent.pop(key, None)
+                self.on_event(event)
+                self.on_status("asr", "ready: microphone interval recognized")
+            except Exception as exc:
+                self.on_status("asr", f"failed: {type(exc).__name__}: {exc}")
+
+    def start(self):
+        import sounddevice as sd
+
+        self.segmenter = Segmenter(self.perception.settings)
+        self.stream = sd.InputStream(
+            device=self.device,
+            samplerate=RATE,
+            channels=1,
+            dtype="float32",
+            blocksize=FRAME,
+            callback=self._callback,
+        )
+        self.thread = threading.Thread(target=self._worker, name="esi-perception", daemon=True)
+        self.thread.start()
+        # Native inference cannot be interrupted safely; let it finish before interpreter shutdown.
+        self.asr_thread = threading.Thread(target=self._asr_worker, name="esi-microphone-asr", daemon=False)
+        self.asr_thread.start()
+        self.stream.start()
+        self.on_status("microphone", "running; headphones recommended; echo cancellation unavailable")
+
+    def close(self):
+        self.stop_event.set()
+        if self.stream:
+            self.stream.stop()
+            self.stream.close()
+        if self.thread:
+            self.thread.join(timeout=2)
+        if self.asr_thread:
+            self.asr_thread.join(timeout=2)

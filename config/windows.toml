@@ -1,0 +1,11 @@
+release = "ESI-01"
+llm_mode = "assist"
+asr_model_path = "models/faster-whisper-small"
+llm_url = "http://127.0.0.1:8080"
+aivis_url = "http://127.0.0.1:10101"
+tts_model_uuid = "f5017410-fbb5-49e1-97cb-e785f42e15f5"
+tts_speaker_uuid = "d2c99ca6-73e5-486c-994e-ee0ce2d74928"
+tts_style_name = "ノーマル"
+playback = true
+cpu_threads = 2
+seed = 1
