@@ -1,10 +1,12 @@
 import hashlib
 import io
+import math
 from pathlib import Path
 
 import httpx
 import soundfile as sf
 
+from esi.devices import stream_format
 from esi.models import Action, Interpretation, Settings, SpeechPlan
 
 
@@ -194,14 +196,47 @@ class TTS:
         }
 
 
-def play_wave(path, stop_event=None):
+def play_samples(audio, sr, stop_event=None, device=None, routing=None):
     import numpy as np
     import sounddevice as sd
+    from scipy.signal import resample_poly
 
-    audio, sr = sf.read(path, dtype="float32", always_2d=True)
-    with sd.OutputStream(samplerate=sr, channels=audio.shape[1], dtype="float32") as output:
+    audio = np.asarray(audio, dtype=np.float32)
+    if audio.ndim == 1:
+        audio = audio[:, None]
+    rate, channels, name = stream_format(device, "output", sr, audio.shape[1])
+    if routing is not None:
+        routing.update(
+            {
+                "playback_device_id": device,
+                "playback_device_name": name,
+                "playback_sample_rate": rate,
+                "playback_channels": channels,
+            }
+        )
+    if rate != sr:
+        divisor = math.gcd(rate, int(sr))
+        audio = resample_poly(audio, rate // divisor, int(sr) // divisor, axis=0).astype(np.float32)
+    if audio.shape[1] != channels:
+        audio = np.repeat(audio.mean(axis=1, keepdims=True), channels, axis=1)
+    with sd.OutputStream(device=device, samplerate=rate, channels=channels, dtype="float32") as output:
         for i in range(0, len(audio), 512):
             if stop_event and stop_event.is_set():
                 return False
             output.write(np.ascontiguousarray(audio[i : i + 512]))
     return True
+
+
+def play_wave(path, stop_event=None, device=None, routing=None):
+    audio, sr = sf.read(path, dtype="float32", always_2d=True)
+    return play_samples(audio, sr, stop_event, device, routing)
+
+
+def test_tone(device=None, stop_event=None):
+    """User-requested routing test; never submitted as an ESI observation or outcome."""
+    import numpy as np
+
+    samples = np.arange(6400, dtype=np.float32) / 16000
+    envelope = np.minimum(1, np.minimum(samples, 0.4 - samples) / 0.02)
+    audio = 0.08 * np.sin(2 * np.pi * 440 * samples) * envelope
+    return play_samples(audio, 16000, stop_event, device)

@@ -592,6 +592,19 @@ class Core:
 
     def view(self):
         with self.lock:
+            external = next(
+                (
+                    e
+                    for e in reversed(self.events.values())
+                    if e.source in {Source.MICROPHONE, Source.RECORDING, Source.SIMULATED}
+                ),
+                None,
+            )
+            output = next((e for e in reversed(self.events.values()) if e.source == Source.SELF_OUTPUT), None)
+            action = next(
+                (a for a in reversed(self.actions.values()) if external and a.event_id == external.event_id),
+                None,
+            )
             return {
                 "release": RELEASE,
                 "agent_id": self.agent_id,
@@ -602,6 +615,9 @@ class Core:
                 "workspace": [self.events[k].model_dump() for k in self.workspace if k in self.events],
                 "actions": [a.model_dump() for a in list(self.actions.values())[-12:]],
                 "status": dict(self.status),
+                "latest_input": external.model_dump() if external else None,
+                "latest_output": output.model_dump() if output else None,
+                "input_action": action.model_dump() if action else None,
                 "counts": copy.deepcopy(self.predictor.counts),
             }
 

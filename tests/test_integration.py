@@ -1,10 +1,11 @@
 import os
+import threading
 import time
 
 import pytest
 
 from esi.adapters import LLM, TTS
-from esi.audio import FRAME, Perception, Segmenter
+from esi.audio import FRAME, Microphone, Perception, Segmenter
 from esi.core import Core
 from esi.models import ActionKind, Observation, Settings, Source
 from esi.runtime import Runtime
@@ -56,6 +57,33 @@ def test_real_tts_asr_streaming_vad_llm_and_speech_plan(tmp_path):
     events = list(perception.recording(wave["path"]))
     assert events and "こんにちは" in "".join(e.text for e in events)
     assert all(e.source == Source.RECORDING and e.metadata["confidence_calibrated"] is False for e in events)
+    # Feed a 48 kHz stereo fixture through the actual microphone worker/VAD/ASR path.
+    # No physical microphone is claimed: native frames are derived from the real TTS file.
+    from scipy.signal import resample_poly
+
+    native = np.tile(resample_poly(samples, 3, 1)[:, None], (1, 2))
+    recognized = []
+    mic = Microphone(perception, recognized.append, lambda k, v: None)
+    mic.capture_rate, mic.capture_channels = 48000, 2
+    mic.segmenter = Segmenter(settings)
+    mic.thread = threading.Thread(target=mic._worker)
+    mic.asr_thread = threading.Thread(target=mic._asr_worker)
+    mic.thread.start()
+    mic.asr_thread.start()
+    try:
+        for offset in range(0, len(native), FRAME * 3):
+            deadline = time.monotonic() + 10
+            while mic.queue.qsize() > 8 and time.monotonic() < deadline:
+                time.sleep(0.005)
+            mic._callback(native[offset : offset + FRAME * 3], FRAME * 3, None, False)
+        deadline = time.monotonic() + 30
+        while not recognized and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert recognized and "こんにちは" in "".join(e.text for e in recognized)
+        assert recognized[0].metadata["original_sample_rate"] == 48000
+        assert mic.telemetry["rms"] >= 0 and not mic.dropped
+    finally:
+        mic.close()
     core = Core(tmp_path / "pipeline.sqlite3", settings)
     try:
         event = events[0]

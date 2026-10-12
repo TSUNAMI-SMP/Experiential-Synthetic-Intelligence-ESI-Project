@@ -103,3 +103,76 @@ def test_observation_window_renders_and_controls_learning(tmp_path, monkeypatch)
     from PySide6.QtCore import QEvent
 
     app.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
+def test_gui_routes_devices_starts_microphone_and_preserves_experiment_settings(tmp_path, monkeypatch):
+    global _application
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from esi import gui
+
+    chosen = []
+    available = [
+        {"index": 7, "name": "選んだマイク", "hostapi": "WASAPI", "inputs": 1, "outputs": 0},
+        {"index": 9, "name": "選んだスピーカー", "hostapi": "WASAPI", "inputs": 0, "outputs": 2},
+    ]
+
+    class FakeRuntime:
+        def __init__(self, core, input_device, output_device):
+            chosen.append((input_device, output_device))
+            self.microphone = None
+
+        def start(self, microphone=False):
+            chosen.append(microphone)
+            self.microphone = object() if microphone else None
+
+        def stop(self):
+            pass
+
+    monkeypatch.setattr(gui, "audio_devices", lambda: available)
+    monkeypatch.setattr(gui, "Runtime", FakeRuntime)
+    app = _application = QApplication.instance() or QApplication([])
+    core = Core(tmp_path / "gui-routing.sqlite3", Settings(llm_mode="off"))
+    fingerprint = core.settings.fingerprint
+    window = gui.Window(core)
+    window.show()
+    window.resize(900, 650)
+    app.processEvents()
+    assert window.height() <= 650 and window.width() <= 900
+    window.input_devices.setCurrentIndex(1)
+    window.output_devices.setCurrentIndex(1)
+    window.toggle()
+    try:
+        assert chosen == [(7, 9), True]
+        assert "処理中" in window.statusBar().currentMessage()
+        assert not window.input_devices.isEnabled()
+        assert window.microphone_button.text() == "マイクを止める"
+        core.status.update(
+            {
+                "microphone": "running",
+                "audio_input": {
+                    "packets_received": 5,
+                    "rms": 0.1,
+                    "peak": 0.2,
+                    "device_name": "選んだマイク",
+                },
+                "jobs": [{"kind": "interpret", "seconds": 6}],
+            }
+        )
+        window.refresh()
+        assert window.input_meter.value() > 0
+        assert "検討" in window.phase_title.text()
+        assert "6秒" in window.phase_detail.text()
+        assert core.settings.fingerprint == fingerprint
+        assert core.store.meta("settings") == core.settings.model_dump()
+        window.toggle()
+        assert window.input_devices.isEnabled()
+        assert "停止中" in window.statusBar().currentMessage()
+        assert (tmp_path / "audio-devices.json").is_file()
+    finally:
+        window.close()
+        window.deleteLater()
+        from PySide6.QtCore import QEvent
+
+        app.sendPostedEvents(None, QEvent.DeferredDelete)

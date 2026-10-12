@@ -12,6 +12,7 @@ import numpy as np
 import soundfile as sf
 from scipy.signal import correlate, find_peaks, resample_poly
 
+from esi.devices import stream_format
 from esi.models import AcousticFrame, Observation, Settings, Source, uid, utc
 
 RATE = 16000
@@ -207,6 +208,7 @@ class Segmenter:
         self.frames = []
         self.silent = 0
         self.utterance_id = None
+        self.probability = 0.0
 
     def feed(self, frame):
         frame = np.asarray(frame, dtype=np.float32)
@@ -215,6 +217,7 @@ class Segmenter:
         combined = np.concatenate((self.context, frame))[None]
         output, self.h, self.c = self.session.run(None, {"input": combined, "h": self.h, "c": self.c})
         probability = float(np.asarray(output).reshape(-1)[0])
+        self.probability = probability
         self.context = frame[-64:].copy()
         speech = probability >= 0.5
         if speech and not self.frames:
@@ -248,23 +251,53 @@ class Microphone:
         self.thread = None
         self.asr_thread = None
         self.dropped = 0
+        self.capture_id = uid()
+        self.capture_rate, self.capture_channels = RATE, 1
+        self.telemetry_lock = threading.Lock()
+        self.telemetry = {
+            "packets_received": 0,
+            "input_seconds": 0.0,
+            "rms": 0.0,
+            "peak": 0.0,
+            "vad_probability": 0.0,
+            "speaking": False,
+            "speech_intervals": 0,
+            "recognized_intervals": 0,
+            "asr_busy": False,
+        }
+        self.asr_started = None
+        self.reported_at = 0.0
+        self.last_packet = None
+
+    def _report(self, force=False):
+        if self.stop_event.is_set():
+            return
+        now = time.monotonic()
+        if not force and now - self.reported_at < 1:
+            return
+        self.reported_at = now
+        with self.telemetry_lock:
+            self.telemetry["asr_seconds"] = now - self.asr_started if self.asr_started else 0.0
+            self.telemetry["seconds_since_packet"] = now - self.last_packet if self.last_packet else None
+            snapshot = dict(self.telemetry)
+        self.on_status("audio_input", snapshot)
 
     def _callback(self, data, frames, timing, status):
         # No model calls, database I/O or GUI operations in PortAudio callback.
         try:
-            self.queue.put_nowait(
-                (data[:, 0].copy(), time.monotonic(), utc(), bool(status), self.output_active())
-            )
+            self.queue.put_nowait((data.copy(), time.monotonic(), utc(), bool(status), self.output_active()))
         except queue.Full:
             self.dropped += 1
 
     def _worker(self):
         segmenter = self.segmenter
         started, wall, contaminated = None, None, False
+        pending = np.empty(0, dtype=np.float32)
         while not self.stop_event.is_set():
             try:
-                frame, mono, stamp, overflow, own_output = self.queue.get(timeout=0.2)
+                samples, mono, stamp, overflow, own_output = self.queue.get(timeout=0.2)
             except queue.Empty:
+                self._report()
                 continue
             if started is None:
                 started, wall = mono, stamp
@@ -276,29 +309,48 @@ class Microphone:
                 )
                 self.dropped = 0
             try:
-                ready = segmenter.feed(frame)
-                if ready:
-                    audio, utterance_id, continues = ready
-                    try:
-                        self.segments.put_nowait(
-                            (
-                                audio,
-                                {
-                                    "utterance_id": utterance_id,
-                                    "continues": continues,
-                                    "tts_contamination_possible": contaminated,
-                                    "echo_cancellation": "not_implemented",
-                                    "original_sample_rate": RATE,
-                                },
-                                mono - len(audio) / RATE + FRAME / RATE,
-                                wall,
+                converted = mono16(samples, self.capture_rate)
+                with self.telemetry_lock:
+                    self.last_packet = time.monotonic()
+                    self.telemetry["packets_received"] += 1
+                    self.telemetry["input_seconds"] += len(samples) / self.capture_rate
+                    self.telemetry["rms"] = float(np.sqrt(np.mean(converted * converted)))
+                    self.telemetry["peak"] = float(np.max(np.abs(converted)))
+                pending = np.concatenate((pending, converted))
+                while len(pending) >= FRAME:
+                    frame, pending = pending[:FRAME], pending[FRAME:]
+                    ready = segmenter.feed(frame)
+                    with self.telemetry_lock:
+                        self.telemetry["vad_probability"] = segmenter.probability
+                        self.telemetry["speaking"] = bool(segmenter.frames)
+                    if ready:
+                        audio, utterance_id, continues = ready
+                        try:
+                            self.segments.put_nowait(
+                                (
+                                    audio,
+                                    {
+                                        "utterance_id": utterance_id,
+                                        "continues": continues,
+                                        "tts_contamination_possible": contaminated,
+                                        "echo_cancellation": "not_implemented",
+                                        "original_sample_rate": self.capture_rate,
+                                        "original_channels": self.capture_channels,
+                                        "input_device_name": self.telemetry.get("device_name"),
+                                        "input_device_id": self.device,
+                                    },
+                                    mono - len(audio) / RATE + FRAME / RATE,
+                                    wall,
+                                )
                             )
-                        )
-                    except queue.Full:
-                        self.on_status("asr", "overflow: speech interval dropped; bounded ASR queue full")
-                    started, wall, contaminated = None, None, False
-                elif not segmenter.frames:
-                    started, wall, contaminated = None, None, False
+                            with self.telemetry_lock:
+                                self.telemetry["speech_intervals"] += 1
+                        except queue.Full:
+                            self.on_status("asr", "overflow: speech interval dropped; bounded ASR queue full")
+                        started, wall, contaminated = None, None, False
+                    elif not segmenter.frames:
+                        started, wall, contaminated = None, None, False
+                self._report()
             except Exception as exc:
                 self.on_status("vad", f"failed: {type(exc).__name__}: {exc}")
 
@@ -312,6 +364,11 @@ class Microphone:
             try:
                 key = metadata["utterance_id"]
                 metadata["parent_event_id"] = parent.get(key)
+                with self.telemetry_lock:
+                    self.asr_started = time.monotonic()
+                    self.telemetry["asr_busy"] = True
+                self.on_status("asr", "transcribing; first request also loads the local recognition model")
+                self._report(force=True)
                 event = self.perception.recognize(
                     audio, Source.MICROPHONE, metadata=metadata, mono_start=started, wall_start=wall
                 )
@@ -319,21 +376,39 @@ class Microphone:
                     parent[key] = event.event_id
                 else:
                     parent.pop(key, None)
-                self.on_event(event)
-                self.on_status("asr", "ready: microphone interval recognized")
+                if not self.stop_event.is_set():
+                    self.on_event(event)
+                    with self.telemetry_lock:
+                        self.telemetry["recognized_intervals"] += 1
+                    self.on_status("asr", "ready: microphone interval recognized")
             except Exception as exc:
                 self.on_status("asr", f"failed: {type(exc).__name__}: {exc}")
+            finally:
+                with self.telemetry_lock:
+                    self.asr_started = None
+                    self.telemetry["asr_busy"] = False
+                self._report(force=True)
 
     def start(self):
         import sounddevice as sd
 
         self.segmenter = Segmenter(self.perception.settings)
+        self.capture_rate, self.capture_channels, name = stream_format(self.device, "input", RATE)
+        with self.telemetry_lock:
+            self.telemetry.update(
+                {
+                    "device_name": name,
+                    "device_id": self.device,
+                    "capture_sample_rate": self.capture_rate,
+                    "capture_channels": self.capture_channels,
+                }
+            )
         self.stream = sd.InputStream(
             device=self.device,
-            samplerate=RATE,
-            channels=1,
+            samplerate=self.capture_rate,
+            channels=self.capture_channels,
             dtype="float32",
-            blocksize=FRAME,
+            blocksize=round(self.capture_rate * FRAME / RATE),
             callback=self._callback,
         )
         self.thread = threading.Thread(target=self._worker, name="esi-perception", daemon=True)
@@ -343,12 +418,18 @@ class Microphone:
         self.asr_thread.start()
         self.stream.start()
         self.on_status("microphone", "running; headphones recommended; echo cancellation unavailable")
+        self._report(force=True)
 
     def close(self):
+        import sounddevice as sd
+
         self.stop_event.set()
         if self.stream:
-            self.stream.stop()
-            self.stream.close()
+            for operation in (self.stream.stop, self.stream.close):
+                try:
+                    operation()
+                except sd.PortAudioError as exc:
+                    self.on_status("microphone", f"failed: closing disconnected audio device: {exc}")
         if self.thread:
             self.thread.join(timeout=2)
         if self.asr_thread:

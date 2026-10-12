@@ -1,0 +1,258 @@
+{
+  "release": "ESI-01",
+  "recorded_at_jst": "2026-10-13T06:54:04.492130+09:00",
+  "platform": "Linux-6.18.44-x86_64-with-glibc2.41",
+  "python": "3.12.14 (main, Aug 25 2026, 14:00:49) [Clang 22.1.3 ]",
+  "command": "ESI_RUN_INTEGRATION=1 pytest -q --junitxml=/workspace/esi-environment/validation/esi-01-tests.xml",
+  "exit_code": 0,
+  "tests": 38,
+  "passed": 38,
+  "failed": 0,
+  "errors": 0,
+  "skipped": 0,
+  "integration_tests": 2,
+  "runner_seconds": 186.535,
+  "junit_sha256": "1c44d592f57e53fbfc8edc86c511dca318deada0a7d4475f067809244a13c5be",
+  "source_hash_method": "SHA-256 of UTF-8 sorted relative-path + NUL + file SHA-256 + newline; docs/generated data excluded",
+  "source_sha256": "72d3e1a98cea3b06b23e72b9ed5d14fc96bb232670f4ea0ad089a9edcd6035b8",
+  "source_files": {
+    "config/cloud.toml": "71faafffe667e989a3b9b741f1850eb59b02321e08b07f8b23f7238717b3e4ce",
+    "config/windows.toml": "8a30ec7fe67296fb5d85600607937b467c08d620cef0c760cf51a7f6f0cc2bcd",
+    "pyproject.toml": "04057bf933121465e312eb731ccf3ada9ea09db8b22391c90589097a0f311264",
+    "requirements.lock": "68d86f33e36cf5e492d029b4c396dfe6ead92660031f80955b8572e7851d1bb8",
+    "scripts/download-models.py": "197d0899d5da160fd14efb64ef51d3726cc2e50ded674c1abacee7ab2a45c42b",
+    "scripts/install-windows.ps1": "9ff2b312adc58bc67d87baadfee77708492fe255874cc96b71586e1458900ccb",
+    "src/esi/__init__.py": "d540e8c64713799e31076e7358b13f36c875a97bf08e557f531bf0b64f203754",
+    "src/esi/adapters.py": "69a5b35e8a9f157f3f4124b8616fec5df618289cefee083db54f48b7afaf7758",
+    "src/esi/audio.py": "57e4966ec69845a7d26a523da89427583a01865c12b90a7b67ddc90b7ba99fa7",
+    "src/esi/cli.py": "022e2a8f09b25616af64485baff583a6ed0bfe002913c7b795c886a32272f653",
+    "src/esi/core.py": "e8eacd9d823428df3600d50eba0d9f4bb60fef39994ba38c585977c61e8e1b4a",
+    "src/esi/experiments.py": "ae62434bfc95a6394f0d653b46119a5a8ddbb3df5e3a3737264b718f46cf19ec",
+    "src/esi/gui.py": "8e8ce1219c3d48ac5500f665cc0788d9771b4fcb1eee05a7801ef9948eb94d22",
+    "src/esi/learning.py": "984f547e77cb2a8e3e7404d1ace5364851451e529dab3c1040fd6b8639894d66",
+    "src/esi/models.py": "d6ea8d019f6d63c1c94c280d8e5e4f80bad27fe532aa3f7ec2bafea0b1f130f5",
+    "src/esi/runtime.py": "eccca2d52bcd0bfa7815f6648d58ba39dd1ef3b3b76384607f62fc5c496e788e",
+    "src/esi/storage.py": "af724b00a4d00155d9e25e532e7f845e1199ea386586f107c8fdd7a3b0712042",
+    "tests/test_aivis.py": "bd5e680967f7872f8cdd426441c9bed484d3565483e2576cc128722fe6e9e3e4",
+    "tests/test_core.py": "55d976087499d41f4a8e62342baab95e9890dd85f60747b0d2f897beb8af6ff9",
+    "tests/test_experiments_audio.py": "11a016f7df28beab01c8406478c49d9d4ab0625f02d2fcad2e3b31588bafeccd",
+    "tests/test_integration.py": "2c12afcbd0210009b3e01b46d0ccc536b9c5c8a83abb7de395dbca6d653d6610",
+    "tests/test_runtime_gui.py": "193f6ea0cdae2bacdf6488011221143aa3649d148a4b8650c816d64484165391"
+  },
+  "cases": [
+    {
+      "name": "tests.test_aivis.test_requested_aivis_voice_cannot_silently_fall_back[missing_model]",
+      "seconds": 0.002,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_aivis.test_requested_aivis_voice_cannot_silently_fall_back[wrong_version]",
+      "seconds": 0.001,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_aivis.test_requested_aivis_voice_cannot_silently_fall_back[other_speaker]",
+      "seconds": 0.001,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_aivis.test_requested_aivis_voice_cannot_silently_fall_back[missing_style]",
+      "seconds": 0.002,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_decay_uses_elapsed_time_not_tick_count",
+      "seconds": 0.019,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_state_changes_selection_via_recorded_contributions",
+      "seconds": 0.005,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_observation_is_not_admin_operation_and_habituation_changes",
+      "seconds": 0.006,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_unknown_components_and_unselected_actions_are_not_trained",
+      "seconds": 0.007,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_freeze_preserves_all_parameters",
+      "seconds": 0.007,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_imagined_results_rejected[llm]",
+      "seconds": 0.005,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_imagined_results_rejected[self_output]",
+      "seconds": 0.005,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_imagined_results_rejected[imagined]",
+      "seconds": 0.005,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_progress_requires_heldout_measurement",
+      "seconds": 0.005,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_correction_replaces_teacher_instead_of_double_counting",
+      "seconds": 0.006,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_hypotheses_do_not_resolve_questions_without_evidence",
+      "seconds": 0.033,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_stale_or_invalid_llm_results_not_applied",
+      "seconds": 0.005,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_intervening_observation_marks_recovery_attribution_uncertain",
+      "seconds": 0.007,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_self_output_is_separate_and_never_auto_evidence",
+      "seconds": 0.006,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_save_resume_preserves_rng_learning_models_and_identity",
+      "seconds": 0.016,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_crash_tail_recovery_and_strict_replay",
+      "seconds": 0.041,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_branch_ablations_preserve_parent_and_have_replay_boundary",
+      "seconds": 0.023,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_workspace_cut_removes_context_inputs",
+      "seconds": 0.014,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_language_context_is_bounded_without_losing_acoustic_record",
+      "seconds": 0.007,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_semantic_estimates_are_features_without_becoming_ground_truth",
+      "seconds": 0.006,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_observed_learning_changes_actual_selection_with_state_held_fixed",
+      "seconds": 0.223,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_snapshot_and_log_retention_keep_replayable_boundary",
+      "seconds": 0.036,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_status_reader_recovers_tail_without_writing_a_checkpoint",
+      "seconds": 0.007,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_experiments_audio.test_holdout_improves_and_frozen_condition_is_unchanged",
+      "seconds": 0.402,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_experiments_audio.test_evaluation_does_not_update_live_model_memory_or_state",
+      "seconds": 0.015,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_experiments_audio.test_resampling_pitch_and_missing_values",
+      "seconds": 0.012,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_experiments_audio.test_audio_callback_only_enqueues_and_overflow_is_bounded",
+      "seconds": 0.003,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_experiments_audio.test_recording_limit_is_enforced_before_loading_asr",
+      "seconds": 0.228,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_integration.test_real_tts_asr_streaming_vad_llm_and_speech_plan",
+      "seconds": 102.866,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_integration.test_real_autonomous_runtime_selects_and_generates_wave",
+      "seconds": 80.127,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_runtime_gui.test_idle_runtime_updates_and_saves_without_llm_calls",
+      "seconds": 0.288,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_runtime_gui.test_stale_worker_result_is_recorded_and_not_used",
+      "seconds": 0.026,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_runtime_gui.test_failed_inference_does_not_stop_clock_or_fabricate_speech",
+      "seconds": 0.132,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_runtime_gui.test_observation_window_renders_and_controls_learning",
+      "seconds": 0.974,
+      "status": "passed"
+    }
+  ],
+  "dependency_checks": {
+    "passed": 7,
+    "failed": 0,
+    "timestamp_utc": "2026-10-12T21:49:24.404051+00:00"
+  },
+  "verified_voice": {
+    "engine": "AivisSpeech",
+    "engine_version": "1.2.0",
+    "model_uuid": "f5017410-fbb5-49e1-97cb-e785f42e15f5",
+    "model_name": "凛音エル",
+    "model_version": "1.0.0",
+    "speaker_uuid": "d2c99ca6-73e5-486c-994e-ee0ce2d74928",
+    "style_name": "ノーマル",
+    "style_id": 1388823424
+  },
+  "voice_model_sha256": "e7ac9e2636f59d6f6512016d0752f9e9f89c2b3ffd2012a6a1b92791330e23bc",
+  "startup": "Verified after snapshot reconnection and after stopping/restarting helper-owned engines in this task",
+  "limitations": [
+    "Windows and CUDA untested",
+    "Physical microphone/playback untested",
+    "Interactive desktop GUI untested",
+    "Target PC performance and long-duration load unmeasured",
+    "New-task restoration of a future published ESI-01 snapshot unverified"
+  ]
+}
