@@ -2,6 +2,7 @@
 
 import copy
 import json
+import re
 import sqlite3
 import threading
 from collections import OrderedDict
@@ -14,6 +15,8 @@ from esi.models import uid, utc
 from esi.storage import Store
 from esi02.config import Settings
 from esi02.memory import Memory, explicit_candidates
+from esi02.motivation import Brain
+from esi02.motivation import State as MotivationState
 from esi02.world import World
 
 TERMINAL = {"complete", "cancelled", "failed"}
@@ -49,6 +52,8 @@ def validate_state(state):
         raise ValueError("セーブの会話番号やIDが整合していません。")
     if state.get("world") is not None:
         World.model_validate(state["world"])
+    if state.get("motivation") is not None:
+        MotivationState.model_validate(state["motivation"])
 
 
 def inspect_database(path):
@@ -88,6 +93,7 @@ class Session:
         self.world = World()
         self.status = {"running": False, "phase": "stopped", "microphone": "stopped"}
         self.agent_id = self.store.meta("agent_id")
+        self.brain = Brain(self.agent_id, self.world)
         try:
             self.memory = Memory(self.store)
             saved = self.store.load_snapshot()
@@ -98,6 +104,7 @@ class Session:
                 self.elapsed, self.epoch = state["elapsed"], state["epoch"]
                 self.turns = OrderedDict((t["id"], t) for t in state["turns"])
                 self.world = World.model_validate(state.get("world", {}))
+                self.brain = Brain(self.agent_id, self.world, state.get("motivation"))
                 # Recovery is from durable turn events, including uncheckpointed commands.
                 for record in self.store.records(after=saved["seq"], limit=self.settings.max_records + 1):
                     if record["kind"] == "turn_state":
@@ -105,13 +112,26 @@ class Session:
                         self.turns[turn["id"]] = turn
                         self.epoch = max(self.epoch, turn["epoch"])
                         self.elapsed = max(self.elapsed, record["payload"].get("elapsed", self.elapsed))
+                        self.brain.user_turn(self.world, turn)
                     elif record["kind"] == "world_step":
                         self.world.conversation_active = record["payload"]["conversation_active"]
                         self.world.advance(record["payload"]["seconds"])
+                        self.brain.tick(
+                            self.world,
+                            record["payload"]["seconds"],
+                            record["payload"].get("autonomy", False),
+                            record["payload"].get("allow_requests", False),
+                        )
                         self.elapsed = max(self.elapsed, record["payload"]["elapsed"])
                     elif record["kind"] == "world_operation":
-                        self._world_operation(record["payload"]["operation"], record["payload"]["values"])
+                        self._apply_world_command(record["payload"]["operation"], record["payload"]["values"])
+                    elif record["kind"] == "motivation_command":
+                        self._motivation_operation(
+                            record["payload"]["operation"], record["payload"]["values"]
+                        )
                 self.world.conversation_active = False
+                if self.brain.active and self.brain.active.kind.startswith("ask_"):
+                    self._record_motivation(self.brain.restart(self.world))
                 for turn in self.turns.values():
                     if turn["stage"] not in TERMINAL:
                         turn["stage"] = "cancelled"
@@ -156,6 +176,7 @@ class Session:
             }
             self.turns[turn["id"]] = turn
             self._persist(turn)
+            self._record_motivation(self.brain.user_turn(self.world, turn))
             if remember:
                 self._remember(turn)
             else:
@@ -238,37 +259,106 @@ class Session:
             self.status["memory_error"] = ""
             self.status["notice"] = "記憶を更新して保存しました。"
 
-    def advance_world(self, seconds, conversing=False):
+    def _record_motivation(self, events):
+        for event in events:
+            self.store.append(event["kind"], event["payload"])
+
+    def advance_world(self, seconds, conversing=False, autonomy=False, allow_requests=False):
         with self.lock:
             self.world.conversation_active = bool(conversing)
             self.world.advance(seconds)
+            events = self.brain.tick(self.world, seconds, autonomy, allow_requests)
             self.store.append(
                 "world_step",
-                {"seconds": seconds, "conversation_active": bool(conversing), "elapsed": self.elapsed},
+                {
+                    "seconds": seconds,
+                    "conversation_active": bool(conversing),
+                    "elapsed": self.elapsed,
+                    "autonomy": bool(autonomy),
+                    "allow_requests": bool(allow_requests),
+                },
             )
+            self._record_motivation(events)
 
-    def _world_operation(self, operation, values):
+    def _world_operation(self, operation, values, world=None):
+        world = world or self.world
         if operation == "environment":
-            self.world.change_environment(values)
+            world.change_environment(values)
         elif operation == "place":
-            self.world.go_to(values)
+            world.go_to(values)
         elif operation == "move":
-            self.world.move_to(values)
+            world.move_to(values)
         elif operation == "activity":
-            self.world.set_activity(values)
+            world.set_activity(values)
         elif operation == "drink":
-            self.world.drink()
+            world.drink()
         else:
             raise ValueError("部屋の操作が正しくありません。")
 
+    def _apply_world_command(self, operation, values):
+        candidate = self.world.model_copy(deep=True)
+        self._world_operation(operation, values, candidate)
+        events = self.brain.intervention(self.world, operation, values)
+        self.world = candidate
+        self.brain.refresh(self.world, 0)
+        return events
+
     def world_operation(self, operation, values=None):
         with self.lock:
-            self._world_operation(operation, values)
+            events = self._apply_world_command(operation, values)
             self.store.append("world_operation", {"operation": operation, "values": values})
+            self._record_motivation(events)
+
+    def _motivation_operation(self, operation, values):
+        if operation == "enabled":
+            events = self.brain.set_enabled(self.world, values)
+        elif operation == "response":
+            if not isinstance(values, dict) or set(values) != {"id", "answer"}:
+                raise ValueError("お願いへの返答は対象と選択だけを指定してください。")
+            events = self.brain.respond(self.world, values["id"], values["answer"])
+        elif operation == "delivery":
+            events = []
+            self.brain.delivery(values["id"], values["stage"], values.get("audio"))
+        elif operation == "stop_requests":
+            events = self.brain.restart(self.world)
+        else:
+            raise ValueError("自発的な行動の操作が正しくありません。")
+        self.brain.refresh(self.world, 0)
+        return events
+
+    def motivation_operation(self, operation, values):
+        with self.lock:
+            events = self._motivation_operation(operation, values)
+            self.store.append("motivation_command", {"operation": operation, "values": values})
+            self._record_motivation(events)
 
     def dialogue_context(self, query):
         with self.lock:
-            return {"memories": self.memory.context(query), "virtual_world": self.world.context()}
+            if not re.search(
+                r"仮想|部屋|温度|体|疲|調子|様子|状態|暑|寒|欲求|休|気分|気持ち|エネルギー|水分|脳|ホルモン|ドーパミン|行動|何を|なにを|temperature|tired|feel|mood",
+                query,
+                re.IGNORECASE,
+            ):
+                active = self.brain.active
+                if not active or active.text is None:
+                    # Detailed simulation telemetry is unnecessary for greetings, names or arithmetic.
+                    # Retain the simulation flag and actual activity; answer state questions with full observations.
+                    return {
+                        "memories": self.memory.context(query),
+                        "virtual_world": {"simulation_only": True, "activity": self.world.body.activity},
+                        "motivation": {
+                            "simulation_only": True,
+                            "recent_requests": self.brain.recent_requests(self.world),
+                            "active_action": {"label": active.label, "stage": active.stage}
+                            if active
+                            else None,
+                        },
+                    }
+            return {
+                "memories": self.memory.context(query),
+                "virtual_world": self.world.context(),
+                "motivation": self.brain.context(self.world),
+            }
 
     def checkpoint(self, initial=False):
         with self.lock:
@@ -279,6 +369,7 @@ class Session:
                     "epoch": self.epoch,
                     "turns": list(self.turns.values()),
                     "world": self.world.model_dump(),
+                    "motivation": self.brain.state.model_dump(),
                 },
                 initial=initial,
             )
@@ -299,6 +390,7 @@ class Session:
                         "revision": self.memory.revision,
                     },
                     "world": self.world.context(),
+                    "motivation": self.brain.view(self.world),
                 }
             )
 

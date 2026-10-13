@@ -46,6 +46,7 @@ basis=explicitは本人が明言したもの、basis=inferredは推測。AIの�
 class MemoryLLM:
     def __init__(self, settings, client_factory=httpx.Client):
         self.settings, self.client_factory = settings, client_factory
+        self.on_started = None
 
     def extract(self, turn, existing, cancellation):
         data = {
@@ -103,7 +104,7 @@ class MemoryLLM:
                         raise ValueError(
                             "記憶整理には入力が長すぎます。記憶画面から必要な内容を追加できます。"
                         )
-                content, finish_reason = "", None
+                content, finish_reason, notified = "", None, False
                 deadline = time.monotonic() + min(90, self.settings.llm_timeout)
                 with client.stream("POST", "/v1/chat/completions", json=payload) as response:
                     response.raise_for_status()
@@ -122,6 +123,10 @@ class MemoryLLM:
                         for choice in event.get("choices", []):
                             content += choice.get("delta", {}).get("content") or ""
                             finish_reason = choice.get("finish_reason") or finish_reason
+                        if content and not notified:
+                            notified = True
+                            if self.on_started:
+                                self.on_started(turn["id"])
                         if len(content) > 8192:
                             raise ValueError("記憶整理の返答が上限を超えました。")
                 cancellation.check()

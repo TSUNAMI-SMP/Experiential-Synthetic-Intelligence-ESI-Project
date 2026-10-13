@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QTabWidget,
     QTextEdit,
     QVBoxLayout,
@@ -114,6 +115,27 @@ class Window(QMainWindow):
         layout.addWidget(self.capture)
         self.memory_summary = QLabel()
         layout.addWidget(self.memory_summary)
+        self.body_action = QLabel()
+        layout.addWidget(self.body_action)
+        self.request_id = None
+        self.request_card = QWidget()
+        card = QVBoxLayout(self.request_card)
+        self.request_text = QLabel()
+        self.request_text.setWordWrap(True)
+        card.addWidget(self.request_text)
+        buttons = QHBoxLayout()
+        self.request_accept = QPushButton()
+        self.request_accept.clicked.connect(self.accept_request)
+        self.request_later = QPushButton("あとで")
+        self.request_later.clicked.connect(lambda: self.respond_request("later"))
+        self.request_decline = QPushButton("今回は断る")
+        self.request_decline.clicked.connect(lambda: self.respond_request("decline"))
+        for button in (self.request_accept, self.request_later, self.request_decline):
+            buttons.addWidget(button)
+        buttons.addStretch()
+        card.addLayout(buttons)
+        self.request_card.setStyleSheet("QWidget {background: #264b54; border-radius: 6px;}")
+        layout.addWidget(self.request_card)
         self.conversation = QTextEdit()
         self.conversation.setReadOnly(True)
         self.tabs = QTabWidget()
@@ -121,7 +143,17 @@ class Window(QMainWindow):
         from esi02.world_gui import WorldPanel
 
         self.world_panel = WorldPanel(self)
-        self.tabs.addTab(self.world_panel, "仮想の部屋・身体")
+        world_scroll = QScrollArea()
+        world_scroll.setWidgetResizable(True)
+        world_scroll.setWidget(self.world_panel)
+        self.tabs.addTab(world_scroll, "仮想の部屋・身体")
+        from esi02.motivation_gui import MotivationPanel
+
+        self.motivation_panel = MotivationPanel(self)
+        motivation_scroll = QScrollArea()
+        motivation_scroll.setWidgetResizable(True)
+        motivation_scroll.setWidget(self.motivation_panel)
+        self.tabs.addTab(motivation_scroll, "欲求・行動の学習")
         layout.addWidget(self.tabs, 1)
         input_row = QHBoxLayout()
         self.text = QLineEdit()
@@ -182,7 +214,12 @@ class Window(QMainWindow):
 
     def toggle(self):
         if self.runtime:
-            self.runtime.stop()
+            try:
+                self.runtime.stop()
+            except Exception as exc:
+                self.ui_error = f"停止処理を確認してください：{exc}"
+                self.error.setText(self.ui_error)
+                return
             self.runtime = None
         else:
             try:
@@ -281,6 +318,70 @@ class Window(QMainWindow):
             self.error.setText(self.ui_error)
             return False
 
+    def motivation_action(self, operation, data=None):
+        try:
+            if self.runtime:
+                return self.send("motivation", (operation, data))
+            self.session.motivation_operation(operation, data)
+            self.session.checkpoint()
+            self.ui_error = ""
+            self.refresh()
+            return True
+        except Exception as exc:
+            self.ui_error = str(exc)
+            self.error.setText(self.ui_error)
+            return False
+
+    def respond_request(self, answer):
+        if self.request_id:
+            return self.motivation_action("response", {"id": self.request_id, "answer": answer})
+        return False
+
+    def accept_request(self):
+        active = self.session.view()["motivation"]["active_action"]
+        if not active or active["id"] != self.request_id:
+            return
+        kind = active["kind"]
+        if kind in {"ask_cool", "ask_warm"}:
+            self.world_action("environment", {"temperature": 23.0})
+        elif kind == "ask_quiet":
+            self.world_action("environment", {"noise_db": 30.0})
+        elif kind == "ask_talk":
+            self.respond_request("accept")
+            self.text.setFocus()
+
+    def refresh_motivation(self, view, status):
+        self.motivation_panel.refresh(view)
+        active = view["active_action"]
+        self.body_action.setText(
+            "身体の行動："
+            + (active["label"] if active else "様子を見ています")
+            + ("（自発的な行動OFF）" if not view["enabled"] else "")
+        )
+        request = active if active and active["request"] else None
+        self.request_id = request["id"] if request else None
+        self.request_card.setVisible(bool(request))
+        if request:
+            self.request_text.setText(
+                "ESIからのお願い（対応は任意です）\n"
+                + request["request"]
+                + (
+                    "\n設定の変更を確認しました。身体の変化を観測中です。"
+                    if request["response_observed"]
+                    else ""
+                )
+                + ("\n音声の処理：" + status["request_error"] if status.get("request_error") else "")
+            )
+            self.request_accept.setText(
+                {
+                    "ask_cool": "仮想の温度を下げる",
+                    "ask_warm": "仮想の温度を上げる",
+                    "ask_quiet": "仮想の音を小さくする",
+                    "ask_talk": "話しかける",
+                }[request["kind"]]
+            )
+            self.request_accept.setEnabled(not request["response_observed"])
+
     def switch_save(self, path):
         from esi02.migration import validate_save
 
@@ -344,7 +445,10 @@ class Window(QMainWindow):
         view = self.session.view()
         status = view["status"]
         self.world_panel.refresh(view["world"])
+        self.refresh_motivation(view["motivation"], status)
         self.phase.setText(PHASES.get(status.get("phase"), "状態を確認中"))
+        if status.get("phase") == "waiting" and status.get("request_phase") in {"synthesizing", "playing"}:
+            self.phase.setText("ESIからのお願いを声にしています")
         backend = self.backend
         mode = (
             "GPU"
@@ -399,8 +503,8 @@ class Window(QMainWindow):
         if content != self.conversation.toPlainText():
             self.conversation.setPlainText(content)
             self.conversation.verticalScrollBar().setValue(self.conversation.verticalScrollBar().maximum())
-        if status.get("error") or self.ui_error:
-            self.error.setText(status.get("error") or self.ui_error)
+        if status.get("error") or status.get("control_error") or self.ui_error:
+            self.error.setText(status.get("error") or status.get("control_error") or self.ui_error)
         else:
             self.error.clear()
         self.send_button.setEnabled(bool(self.runtime))
@@ -409,7 +513,14 @@ class Window(QMainWindow):
     def closeEvent(self, event):
         self.timer.stop()
         if self.runtime:
-            self.runtime.stop()
+            try:
+                self.runtime.stop()
+            except Exception as exc:
+                self.ui_error = f"停止を確認できないため、セーブを開いたままにしています：{exc}"
+                self.error.setText(self.ui_error)
+                self.timer.start(100)
+                event.ignore()
+                return
             self.runtime = None
         self.session.close()
         event.accept()

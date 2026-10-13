@@ -38,12 +38,17 @@ class Runtime:
         self.thread = None
         self.llm = llm or DialogueLLM(self.settings)
         self.memory_llm = memory_llm or MemoryLLM(self.settings)
+        if memory_llm is None:
+            self.memory_llm.on_started = lambda identifier: self._emit(
+                "status", ("memory_stream_started", identifier)
+            )
         self.memory_task = None
+        self.request_voice = None
         self.tts = tts or TTS(self.settings.audio_settings(), session.store.path.parent / "output")
         self.perception = perception or AcceleratedPerception(
             self.settings,
             session.store.path.parent / "audio",
-            lambda state: self._emit("status", ("asr_device", state)),
+            lambda state: self._telemetry("status", ("asr_device", state)),
         )
         self.playback = playback
         self.pools = {
@@ -72,6 +77,13 @@ class Runtime:
                 pass
         raise Cancelled()
 
+    def _telemetry(self, name, data):
+        # Late device telemetry must not raise into PortAudio shutdown or native ASR cleanup.
+        try:
+            self._emit(name, data)
+        except Cancelled:
+            pass
+
     def start(self, microphone=False):
         if self.thread:
             raise RuntimeError("停止後は新しいRuntimeで再開してください。")
@@ -87,10 +99,11 @@ class Runtime:
         self.jobs[future] = {"kind": kind, "started": time.monotonic(), **metadata}
 
     def _cancel_current(self, reason):
-        if self.current:
-            self.current["cancellation"].set()
-            self.current["voice_stop"].set()
-            turn_id = self.current["turn_id"]
+        current = self.current
+        if current:
+            current["cancellation"].set()
+            current["voice_stop"].set()
+            turn_id = current["turn_id"]
             if self.session.turns[turn_id]["stage"] not in TERMINAL:
                 self.session.update_turn(turn_id, stage="cancelled", cancellation=reason)
         self.voice.clear()
@@ -115,6 +128,7 @@ class Runtime:
                 self.session.store.append("echo_suppressed", {"observation_id": observation.event_id})
                 return
         self._cancel_memory()
+        self._cancel_request_voice()
         self._cancel_current("新しい会話入力")
         turn = self.session.create_turn(text, source, observation.event_id if observation else None)
         self.current = {
@@ -133,6 +147,18 @@ class Runtime:
     def _cancel_memory(self):
         if self.memory_task:
             self.memory_task["cancellation"].set()
+
+    def _cancel_request_voice(self):
+        request = self.request_voice
+        if request:
+            request["stop"].set()
+            action = next((a for a in self.session.brain.state.actions if a.id == request["id"]), None)
+            if action and action.delivered not in {"interrupted", "played", "file_only", "failed"}:
+                self.session.motivation_operation("delivery", {"id": request["id"], "stage": "interrupted"})
+        self._status("request_phase", "waiting")
+
+    def _voice_busy(self):
+        return any(j["kind"] in {"voice", "request_voice"} for j in self.jobs.values())
 
     def _status(self, name, value):
         with self.session.lock:
@@ -168,9 +194,18 @@ class Runtime:
             # This channel does not advance the conversation epoch or cancel its work.
             self.session.world_operation("environment", data)
             self._status("environment", data)
+            self._status("control_error", "")
         elif name == "world":
             operation, values = data
             self.session.world_operation(operation, values)
+            self._status("control_error", "")
+        elif name == "motivation":
+            operation, values = data
+            self.session.motivation_operation(operation, values)
+            self._status("control_error", "")
+            active = self.session.brain.active
+            if self.request_voice and (not active or active.id != self.request_voice["id"]):
+                self._cancel_request_voice()
         elif name == "status":
             self._status(*data)
         elif name == "microphone_status":
@@ -187,7 +222,7 @@ class Runtime:
                 mic = Microphone(
                     self.perception,
                     lambda event: self._emit("observe", event),
-                    lambda k, v: self._emit("microphone_status", (mic.capture_id, k, v)),
+                    lambda k, v: self._telemetry("microphone_status", (mic.capture_id, k, v)),
                     self.output_active.is_set,
                     self.input_device,
                 )
@@ -225,6 +260,19 @@ class Runtime:
                 self._status("phase", phase)
                 if phase == "playing" and self.current["first_voice"] is None:
                     self.current["first_voice"] = time.monotonic() - self.current["accepted_at"]
+        elif name == "request_voice_phase":
+            request_id, phase = data
+            request = self.request_voice
+            action = next((a for a in self.session.brain.state.actions if a.id == request_id), None)
+            if (
+                request
+                and request["id"] == request_id
+                and not request["stop"].is_set()
+                and action
+                and action.delivered not in {"played", "file_only", "interrupted", "failed"}
+            ):
+                self.session.motivation_operation("delivery", {"id": request_id, "stage": phase})
+                self._status("request_phase", phase)
         elif name == "outgoing":
             self.outgoing.append(data)
         else:
@@ -244,7 +292,8 @@ class Runtime:
         stop, turn_id = item["stop"], item["turn_id"]
         if stop.is_set():
             raise Cancelled()
-        self._emit("voice_phase", (turn_id, "synthesizing"))
+        phase_event = "request_voice_phase" if item.get("request") else "voice_phase"
+        self._emit(phase_event, (turn_id, "synthesizing"))
         started = time.monotonic()
         audio = self.tts.synthesize(item["text"], f"{turn_id}-{item['index']}")
         synthesized = time.monotonic() - started
@@ -262,7 +311,7 @@ class Runtime:
                 },
             )
             try:
-                self._emit("voice_phase", (turn_id, "playing"))
+                self._emit(phase_event, (turn_id, "playing"))
                 audio["played"] = bool(self.playback(audio["path"], stop, self.output_device, audio))
             finally:
                 self.output_active.clear()
@@ -285,7 +334,21 @@ class Runtime:
             turn_id = job.get("turn_id")
             try:
                 result = future.result()
-                if job["kind"] == "memory":
+                if job["kind"] == "request_voice":
+                    request = self.request_voice
+                    if request and request["id"] == turn_id and not request["stop"].is_set():
+                        self.session.motivation_operation(
+                            "delivery",
+                            {
+                                "id": turn_id,
+                                "stage": "played" if result["played"] else "file_only",
+                                "audio": result,
+                            },
+                        )
+                        self._status("request_phase", "waiting")
+                    if request and request["id"] == turn_id:
+                        self.request_voice = None
+                elif job["kind"] == "memory":
                     self.memory_task = None
                     if not job["cancellation"].event.is_set():
                         with self.session.lock:
@@ -326,7 +389,19 @@ class Runtime:
                 if job["kind"] == "memory":
                     self.memory_task = None
                     self._status("memory_phase", "waiting")
+                elif job["kind"] == "request_voice":
+                    if self.request_voice and self.request_voice["id"] == turn_id:
+                        self.request_voice = None
+                    self._status("request_phase", "waiting")
             except Exception as exc:
+                if job["kind"] == "request_voice":
+                    request = self.request_voice
+                    if request and request["id"] == turn_id and not request["stop"].is_set():
+                        self.session.motivation_operation("delivery", {"id": turn_id, "stage": "failed"})
+                        self._status("request_error", str(exc))
+                    self.request_voice = None
+                    self._status("request_phase", "waiting")
+                    continue
                 if job["kind"] == "memory":
                     self.memory_task = None
                     if not job["cancellation"].event.is_set():
@@ -345,7 +420,10 @@ class Runtime:
                     self.session.store.append("stale_worker_error", {"turn_id": turn_id, "error": str(exc)})
 
     def _schedule(self):
+        if self.halt.is_set():
+            return
         if not self.current or not self._is_current(self.current["turn_id"]):
+            self._schedule_request()
             self._schedule_memory()
             return
         current, turn_id = self.current, self.current["turn_id"]
@@ -378,7 +456,7 @@ class Runtime:
                 self.voice.append(
                     {"turn_id": turn_id, "index": 0, "text": text, "stop": current["voice_stop"]}
                 )
-        if self.voice and not any(j["kind"] == "voice" for j in self.jobs.values()):
+        if self.voice and not self._voice_busy():
             item = self.voice.popleft()
             self._job("voice", "voice", self._speak, item, turn_id=item["turn_id"])
         active = any(
@@ -396,6 +474,28 @@ class Runtime:
             )
             self._status("phase", "waiting")
 
+    def _schedule_request(self):
+        if (
+            self.halt.is_set()
+            or self._voice_busy()
+            or self.session.status.get("audio_input", {}).get("asr_busy")
+            or any(j["kind"] == "recording" for j in self.jobs.values())
+        ):
+            return
+        active = self.session.brain.active
+        if not active or not active.text or active.delivered != "not_sent":
+            return
+        stop = threading.Event()
+        self.request_voice = {"id": active.id, "stop": stop}
+        self._status("request_error", "")
+        self._job(
+            "voice",
+            "request_voice",
+            self._speak,
+            {"turn_id": active.id, "index": 0, "text": active.text, "stop": stop, "request": True},
+            turn_id=active.id,
+        )
+
     def _schedule_memory(self):
         if self.halt.is_set() or any(j["kind"] in {"reply", "memory"} for j in self.jobs.values()):
             return
@@ -407,6 +507,7 @@ class Runtime:
         existing = self.session.memory.search(request["input"], limit=12)
         self.memory_task = {"cancellation": cancellation}
         self._status("memory_phase", "organizing")
+        self._status("memory_stream_started", "")
         self._job(
             "llm",
             "memory",
@@ -432,7 +533,15 @@ class Runtime:
                 last = now
                 if world_time >= 0.5:
                     conversing = bool(self.current and self._is_current(self.current["turn_id"]))
-                    self.session.advance_world(min(60, world_time), conversing)
+                    allow_requests = (
+                        not conversing
+                        and not self._voice_busy()
+                        and not self.session.status.get("audio_input", {}).get("asr_busy")
+                        and not any(j["kind"] == "recording" for j in self.jobs.values())
+                    )
+                    self.session.advance_world(
+                        min(60, world_time), conversing, autonomy=True, allow_requests=allow_requests
+                    )
                     world_time = 0.0
                 for _ in range(64):
                     try:
@@ -442,12 +551,20 @@ class Runtime:
                     try:
                         self._handle(name, data)
                     except Exception as exc:
+                        if name in {"environment", "world", "motivation"}:
+                            self._status("control_error", f"{name}：{exc}")
+                            continue
                         if name in {"delta", "sentence", "voice_phase"} and self.current:
                             self._cancel_current("返答の処理が失敗")
                             self.session.update_turn(self.current["turn_id"], stage="failed", error=str(exc))
                         self._status("error", f"{name}：{exc}")
                         self._status("phase", "failed")
                 self._finish_jobs()
+                active_request = self.session.brain.active
+                if self.request_voice and (
+                    not active_request or active_request.id != self.request_voice["id"]
+                ):
+                    self._cancel_request_voice()
                 # Completion is applied only after queued stream events have been consumed.
                 if self.queue.empty():
                     self._schedule()
@@ -462,24 +579,51 @@ class Runtime:
         except Exception as exc:
             self._status("error", f"本体：{type(exc).__name__}: {exc}")
         finally:
+            self.accepting = False
+            self.halt.set()
             self._cancel_memory()
             self._status("memory_phase", "stopped")
             self._cancel_current("停止")
+            self._cancel_request_voice()
+            microphone, self.microphone = self.microphone, None
+            if microphone:
+                try:
+                    microphone.close()
+                except Exception as exc:
+                    self._status("error", f"マイクの終了：{exc}")
+            self._status("microphone", "stopped")
+            self.session.motivation_operation("stop_requests", None)
             if world_time > 0:
-                self.session.advance_world(min(60, world_time), False)
+                try:
+                    self.session.advance_world(min(60, world_time), False)
+                except Exception as exc:
+                    self._status("shutdown_error", f"最後の身体更新を保存できません：{exc}")
             self.session.world.conversation_active = False
             self._status("running", False)
             self._status("phase", "stopped")
+            for pool in self.pools.values():
+                pool.shutdown(wait=False, cancel_futures=True)
             self.session.checkpoint()
 
     def stop(self):
         self.accepting = False
         self.halt.set()
         self._cancel_memory()
-        self._cancel_current("停止")
+        # Signal native playback promptly; only the owner writes the cancelled turn state.
+        current = self.current
+        if current:
+            current["cancellation"].set()
+            current["voice_stop"].set()
+        if self.request_voice:
+            self.request_voice["stop"].set()
+        if not self.thread:
+            self._cancel_current("停止")
+            self._cancel_request_voice()
         if self.microphone:
-            self.microphone.close()
-            self.microphone = None
+            self.microphone.stop_event.set()
+            if not self.thread:
+                self.microphone.close()
+                self.microphone = None
         if self.thread:
             self.thread.join(timeout=5)
             if self.thread.is_alive():

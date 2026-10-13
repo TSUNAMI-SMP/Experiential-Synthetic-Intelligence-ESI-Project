@@ -85,6 +85,7 @@ def migrate_esi01(source, destination, settings=None):
             state = core.dump()  # includes durable input commands after the last snapshot
             session = Session(converted, settings or Settings())
             session.agent_id = core.agent_id
+            session.brain.agent_id = core.agent_id
             session.elapsed = core.elapsed
             session.store.set_meta("agent_id", core.agent_id)
             session.store.set_meta("parent_branch_id", core.branch_id)
