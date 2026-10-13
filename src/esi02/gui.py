@@ -1,4 +1,4 @@
-"""Development observer for conversation. Final desktop/avatar UI is a later required stage."""
+"""ESI-02 development UI and independent desktop controls."""
 
 import math
 from pathlib import Path
@@ -24,18 +24,10 @@ from PySide6.QtWidgets import (
 
 from esi.devices import audio_devices, identity, load_preferences, resolve_device, save_preferences
 from esi.icons import icon
+from esi02.desktop import DesktopViews
+from esi02.presentation import BODY_SYMBOLS, activity
 from esi02.runtime import Runtime
 from esi02.session import Session
-
-PHASES = {
-    "stopped": "停止中",
-    "waiting": "話しかけてください",
-    "queued": "前の処理を止めて返答を準備中",
-    "generating": "返答の文章を考えています",
-    "synthesizing": "凛音エルの声を作っています",
-    "playing": "音声を再生しています",
-    "failed": "処理に問題が起きています",
-}
 
 
 class Window(QMainWindow):
@@ -61,7 +53,7 @@ class Window(QMainWindow):
         controls = QHBoxLayout()
         self.start_button = QPushButton("開始")
         self.start_button.setIcon(icon("start"))
-        self.start_button.clicked.connect(self.toggle)
+        self.start_button.clicked.connect(lambda: self.toggle())
         self.mic_button = QPushButton("マイクOFF")
         self.mic_button.setIcon(icon("microphone"))
         self.mic_button.clicked.connect(lambda: self.send("microphone"))
@@ -75,6 +67,7 @@ class Window(QMainWindow):
         open_save.setIcon(icon("folder"))
         open_save.clicked.connect(self.open_save)
         memories = QPushButton("記憶を見る・直す")
+        memories.setIcon(icon("reprocess"))
         memories.clicked.connect(self.open_memories)
         recording = QPushButton("録音ファイルを入力")
         recording.clicked.connect(self.recording)
@@ -90,6 +83,19 @@ class Window(QMainWindow):
             controls.addWidget(widget)
         controls.addStretch()
         layout.addLayout(controls)
+        desktop_controls = QHBoxLayout()
+        self.desktop_mic = QCheckBox("丸型マイクボタンを表示")
+        self.desktop_mic.toggled.connect(lambda enabled: self.set_desktop_visible("microphone", enabled))
+        self.desktop_avatar = QCheckBox("立ち絵を表示（制作中）")
+        self.desktop_avatar.toggled.connect(lambda enabled: self.set_desktop_visible("avatar", enabled))
+        reset_mic = QPushButton("マイクの位置を戻す")
+        reset_mic.clicked.connect(lambda: self.desktop.reset_position("microphone"))
+        reset_avatar = QPushButton("立ち絵の位置を戻す")
+        reset_avatar.clicked.connect(lambda: self.desktop.reset_position("avatar"))
+        for widget in (self.desktop_mic, self.desktop_avatar, reset_mic, reset_avatar):
+            desktop_controls.addWidget(widget)
+        desktop_controls.addStretch()
+        layout.addLayout(desktop_controls)
         routing = QHBoxLayout()
         routing.addWidget(QLabel("入力マイク"))
         self.input_devices = QComboBox()
@@ -106,7 +112,12 @@ class Window(QMainWindow):
         layout.addWidget(self.hardware)
         self.phase = QLabel("停止中")
         self.phase.setStyleSheet("font-size: 22px; color: #70dccc; font-weight: bold")
-        layout.addWidget(self.phase)
+        phase_row = QHBoxLayout()
+        self.phase_icon = QLabel()
+        self.phase_icon.setFixedSize(32, 32)
+        phase_row.addWidget(self.phase_icon)
+        phase_row.addWidget(self.phase, 1)
+        layout.addLayout(phase_row)
         self.meter = QProgressBar()
         self.meter.setRange(0, 100)
         layout.addWidget(self.meter)
@@ -116,7 +127,12 @@ class Window(QMainWindow):
         self.memory_summary = QLabel()
         layout.addWidget(self.memory_summary)
         self.body_action = QLabel()
-        layout.addWidget(self.body_action)
+        body_row = QHBoxLayout()
+        self.body_icon = QLabel()
+        self.body_icon.setFixedSize(24, 24)
+        body_row.addWidget(self.body_icon)
+        body_row.addWidget(self.body_action, 1)
+        layout.addLayout(body_row)
         self.request_id = None
         self.request_card = QWidget()
         card = QVBoxLayout(self.request_card)
@@ -180,8 +196,39 @@ class Window(QMainWindow):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
         self.timer.start(100)
+        self.desktop = DesktopViews(self, session.store.path.parent / "esi02-desktop.json")
+        self.sync_desktop_checks()
         self.refresh_devices()
         self.refresh()
+
+    def sync_desktop_checks(self):
+        for checkbox, name in ((self.desktop_mic, "microphone"), (self.desktop_avatar, "avatar")):
+            checkbox.blockSignals(True)
+            checkbox.setChecked(getattr(self.desktop.preferences, name + "_visible"))
+            checkbox.blockSignals(False)
+
+    def set_desktop_visible(self, name, enabled):
+        self.desktop.set_visible(name, enabled)
+        self.sync_desktop_checks()
+
+    def show_main(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def desktop_microphone(self):
+        self.reap_runtime()
+        if self.runtime:
+            self.send("microphone")
+        else:
+            self.toggle(microphone=True)
+
+    def reap_runtime(self):
+        runtime = self.runtime
+        thread = getattr(runtime, "thread", None)
+        if thread is not None and not thread.is_alive():
+            runtime.stop()
+            self.runtime = None
 
     def refresh_devices(self):
         if self.runtime:
@@ -212,7 +259,8 @@ class Window(QMainWindow):
             self.ui_error = f"機器を確認できません：{exc}"
             self.error.setText(self.ui_error)
 
-    def toggle(self):
+    def toggle(self, microphone=None):
+        self.reap_runtime()
         if self.runtime:
             try:
                 self.runtime.stop()
@@ -234,18 +282,13 @@ class Window(QMainWindow):
                     self.on_start.isChecked(),
                 )
                 self.runtime = Runtime(self.session, input_id, output_id)
-                self.runtime.start(microphone=self.on_start.isChecked())
+                self.runtime.start(microphone=self.on_start.isChecked() if microphone is None else microphone)
             except Exception as exc:
                 if self.runtime:
                     self.runtime.stop()
                     self.runtime = None
                 self.ui_error = str(exc)
                 self.error.setText(self.ui_error)
-        for widget in (self.input_devices, self.output_devices, self.reload, self.on_start):
-            widget.setEnabled(self.runtime is None)
-        self.mic_button.setEnabled(self.runtime is not None)
-        self.start_button.setText("停止" if self.runtime else "開始")
-        self.start_button.setIcon(icon("stop" if self.runtime else "start"))
         self.refresh()
 
     def send(self, name, data=None):
@@ -353,6 +396,9 @@ class Window(QMainWindow):
     def refresh_motivation(self, view, status):
         self.motivation_panel.refresh(view)
         active = view["active_action"]
+        self.body_icon.setPixmap(
+            icon(BODY_SYMBOLS.get(active["kind"], "wait") if active else "wait").pixmap(24, 24)
+        )
         self.body_action.setText(
             "身体の行動："
             + (active["label"] if active else "様子を見ています")
@@ -395,6 +441,8 @@ class Window(QMainWindow):
         try:
             if self.runtime:
                 self.toggle()
+                if self.runtime:
+                    raise RuntimeError("動作を停止できないため、セーブを切り替えませんでした。")
             if self.services:
                 self.services.prepare(candidate.settings)
                 self.backend = self.services.backend
@@ -403,6 +451,9 @@ class Window(QMainWindow):
             raise
         old, self.session = self.session, candidate
         old.close()
+        self.desktop.shutdown()
+        self.desktop = DesktopViews(self, path.parent / "esi02-desktop.json")
+        self.sync_desktop_checks()
         self.preferences_path = path.parent / "audio-devices.json"
         try:
             self.preferences = load_preferences(self.preferences_path)
@@ -442,13 +493,20 @@ class Window(QMainWindow):
             self.error.setText(self.ui_error)
 
     def refresh(self):
+        self.reap_runtime()
         view = self.session.view()
         status = view["status"]
         self.world_panel.refresh(view["world"])
         self.refresh_motivation(view["motivation"], status)
-        self.phase.setText(PHASES.get(status.get("phase"), "状態を確認中"))
-        if status.get("phase") == "waiting" and status.get("request_phase") in {"synthesizing", "playing"}:
-            self.phase.setText("ESIからのお願いを声にしています")
+        symbol, phase_text = activity(status)
+        self.phase.setText(phase_text)
+        self.phase_icon.setPixmap(icon(symbol).pixmap(32, 32))
+        running = self.runtime is not None
+        for widget in (self.input_devices, self.output_devices, self.reload, self.on_start):
+            widget.setEnabled(not running)
+        self.mic_button.setEnabled(running)
+        self.start_button.setText("停止" if running else "開始")
+        self.start_button.setIcon(icon("stop" if running else "start"))
         backend = self.backend
         mode = (
             "GPU"
@@ -470,7 +528,9 @@ class Window(QMainWindow):
             + (backend.get("reason") or backend.get("fallback_reason") or "")
             + ("\n" + asr["fallback_reason"] if asr.get("fallback_reason") else "")
         )
-        mic = bool(self.runtime and self.runtime.microphone)
+        capture = getattr(self.runtime, "microphone", None)
+        stop_event = getattr(capture, "stop_event", None)
+        mic = bool(capture and not (stop_event and stop_event.is_set()))
         self.mic_button.setText("マイクON" if mic else "マイクOFF")
         audio = status.get("audio_input", {})
         rms = audio.get("rms", 0) if mic and (audio.get("seconds_since_packet") or 0) < 2 else 0
@@ -503,11 +563,13 @@ class Window(QMainWindow):
         if content != self.conversation.toPlainText():
             self.conversation.setPlainText(content)
             self.conversation.verticalScrollBar().setValue(self.conversation.verticalScrollBar().maximum())
-        if status.get("error") or status.get("control_error") or self.ui_error:
-            self.error.setText(status.get("error") or status.get("control_error") or self.ui_error)
+        problem = status.get("error") or status.get("control_error") or self.ui_error or self.desktop.problem
+        if problem:
+            self.error.setText(problem)
         else:
             self.error.clear()
-        self.send_button.setEnabled(bool(self.runtime))
+        self.desktop.refresh(running, mic, symbol, phase_text, problem)
+        self.send_button.setEnabled(running)
         self.statusBar().showMessage(f"セーブ：{self.session.store.path.name} / 活動 {view['elapsed']:.1f}秒")
 
     def closeEvent(self, event):
@@ -522,6 +584,7 @@ class Window(QMainWindow):
                 event.ignore()
                 return
             self.runtime = None
+        self.desktop.shutdown()
         self.session.close()
         event.accept()
 

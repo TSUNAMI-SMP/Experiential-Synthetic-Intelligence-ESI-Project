@@ -10,7 +10,9 @@ from esi.models import Settings as AudioSettings
 
 
 class Settings(BaseModel):
-    model_config = ConfigDict(extra="forbid", validate_assignment=True, allow_inf_nan=False)
+    model_config = ConfigDict(
+        extra="forbid", validate_assignment=True, validate_default=True, allow_inf_nan=False
+    )
     release: Literal["ESI-02"] = "ESI-02"
     llm_url: str = "http://127.0.0.1:8080"
     llm_model: str = "Qwen3-4B"

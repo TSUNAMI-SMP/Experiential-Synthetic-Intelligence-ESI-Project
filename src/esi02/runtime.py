@@ -87,6 +87,11 @@ class Runtime:
     def start(self, microphone=False):
         if self.thread:
             raise RuntimeError("停止後は新しいRuntimeで再開してください。")
+        # A restarted owner must not display the old failure or old ASR verification.
+        for name in ("error", "control_error", "shutdown_error", "request_error"):
+            self._status(name, "")
+        self._status("asr_device", {})
+        self._status("audio_input", {})
         self.accepting = True
         self.thread = threading.Thread(target=self._loop, name="esi02-owner", daemon=True)
         self.thread.start()
