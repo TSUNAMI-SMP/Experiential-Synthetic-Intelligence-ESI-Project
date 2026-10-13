@@ -59,6 +59,8 @@ def test_real_asr_streamed_dialogue_rion_audio_and_restart(tmp_path):
             for c in turn["chunks"]
         )
         assert session.store.records("llm_io") and not session.store.records("outcome")
+        assert session.world.elapsed > 0 and session.world.body.energy < 0.85
+        assert session.epoch == 1
     finally:
         runtime.stop()
         session.close()

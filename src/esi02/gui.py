@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QProgressBar,
     QPushButton,
+    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -115,7 +116,13 @@ class Window(QMainWindow):
         layout.addWidget(self.memory_summary)
         self.conversation = QTextEdit()
         self.conversation.setReadOnly(True)
-        layout.addWidget(self.conversation, 1)
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self.conversation, "会話")
+        from esi02.world_gui import WorldPanel
+
+        self.world_panel = WorldPanel(self)
+        self.tabs.addTab(self.world_panel, "仮想の部屋・身体")
+        layout.addWidget(self.tabs, 1)
         input_row = QHBoxLayout()
         self.text = QLineEdit()
         self.text.setMaxLength(2000)
@@ -256,6 +263,24 @@ class Window(QMainWindow):
         dialog.exec()
         dialog.deleteLater()
 
+    def world_action(self, operation, data=None):
+        try:
+            if self.runtime:
+                return (
+                    self.send("environment", data)
+                    if operation == "environment"
+                    else self.send("world", (operation, data))
+                )
+            self.session.world_operation(operation, data)
+            self.session.checkpoint()
+            self.ui_error = ""
+            self.refresh()
+            return True
+        except Exception as exc:
+            self.ui_error = str(exc)
+            self.error.setText(self.ui_error)
+            return False
+
     def switch_save(self, path):
         from esi02.migration import validate_save
 
@@ -318,6 +343,7 @@ class Window(QMainWindow):
     def refresh(self):
         view = self.session.view()
         status = view["status"]
+        self.world_panel.refresh(view["world"])
         self.phase.setText(PHASES.get(status.get("phase"), "状態を確認中"))
         backend = self.backend
         mode = (

@@ -166,7 +166,11 @@ class Runtime:
             self.session.memory_operation(operation, values)
         elif name == "environment":
             # This channel does not advance the conversation epoch or cancel its work.
+            self.session.world_operation("environment", data)
             self._status("environment", data)
+        elif name == "world":
+            operation, values = data
+            self.session.world_operation(operation, values)
         elif name == "status":
             self._status(*data)
         elif name == "microphone_status":
@@ -362,7 +366,7 @@ class Runtime:
                     turn["input"],
                     self.session.history(turn_id),
                     current["cancellation"],
-                    {"memories": self.session.memory.context(turn["input"])},
+                    self.session.dialogue_context(turn["input"]),
                     turn_id=turn_id,
                 )
             else:
@@ -416,7 +420,7 @@ class Runtime:
         )
 
     def _loop(self):
-        last, checkpoint = time.monotonic(), self.session.elapsed
+        last, checkpoint, world_time = time.monotonic(), self.session.elapsed, 0.0
         self._status("running", True)
         self._status("phase", "waiting")
         try:
@@ -424,7 +428,12 @@ class Runtime:
                 now = time.monotonic()
                 with self.session.lock:
                     self.session.elapsed += now - last
+                world_time += now - last
                 last = now
+                if world_time >= 0.5:
+                    conversing = bool(self.current and self._is_current(self.current["turn_id"]))
+                    self.session.advance_world(min(60, world_time), conversing)
+                    world_time = 0.0
                 for _ in range(64):
                     try:
                         name, data = self.queue.get_nowait()
@@ -456,6 +465,9 @@ class Runtime:
             self._cancel_memory()
             self._status("memory_phase", "stopped")
             self._cancel_current("停止")
+            if world_time > 0:
+                self.session.advance_world(min(60, world_time), False)
+            self.session.world.conversation_active = False
             self._status("running", False)
             self._status("phase", "stopped")
             self.session.checkpoint()

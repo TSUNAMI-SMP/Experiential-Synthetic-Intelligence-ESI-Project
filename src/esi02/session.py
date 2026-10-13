@@ -14,6 +14,7 @@ from esi.models import uid, utc
 from esi.storage import Store
 from esi02.config import Settings
 from esi02.memory import Memory, explicit_candidates
+from esi02.world import World
 
 TERMINAL = {"complete", "cancelled", "failed"}
 
@@ -46,6 +47,8 @@ def validate_state(state):
     ids = [t.id for t in value.turns]
     if len(ids) != len(set(ids)) or any(t.epoch > value.epoch for t in value.turns):
         raise ValueError("セーブの会話番号やIDが整合していません。")
+    if state.get("world") is not None:
+        World.model_validate(state["world"])
 
 
 def inspect_database(path):
@@ -82,6 +85,7 @@ class Session:
         self.lock = threading.RLock()
         self.elapsed, self.epoch = 0.0, 0
         self.turns = OrderedDict()
+        self.world = World()
         self.status = {"running": False, "phase": "stopped", "microphone": "stopped"}
         self.agent_id = self.store.meta("agent_id")
         try:
@@ -93,6 +97,7 @@ class Session:
                     raise ValueError("ESI-02の保存状態ではありません。")
                 self.elapsed, self.epoch = state["elapsed"], state["epoch"]
                 self.turns = OrderedDict((t["id"], t) for t in state["turns"])
+                self.world = World.model_validate(state.get("world", {}))
                 # Recovery is from durable turn events, including uncheckpointed commands.
                 for record in self.store.records(after=saved["seq"], limit=self.settings.max_records + 1):
                     if record["kind"] == "turn_state":
@@ -100,6 +105,13 @@ class Session:
                         self.turns[turn["id"]] = turn
                         self.epoch = max(self.epoch, turn["epoch"])
                         self.elapsed = max(self.elapsed, record["payload"].get("elapsed", self.elapsed))
+                    elif record["kind"] == "world_step":
+                        self.world.conversation_active = record["payload"]["conversation_active"]
+                        self.world.advance(record["payload"]["seconds"])
+                        self.elapsed = max(self.elapsed, record["payload"]["elapsed"])
+                    elif record["kind"] == "world_operation":
+                        self._world_operation(record["payload"]["operation"], record["payload"]["values"])
+                self.world.conversation_active = False
                 for turn in self.turns.values():
                     if turn["stage"] not in TERMINAL:
                         turn["stage"] = "cancelled"
@@ -226,6 +238,38 @@ class Session:
             self.status["memory_error"] = ""
             self.status["notice"] = "記憶を更新して保存しました。"
 
+    def advance_world(self, seconds, conversing=False):
+        with self.lock:
+            self.world.conversation_active = bool(conversing)
+            self.world.advance(seconds)
+            self.store.append(
+                "world_step",
+                {"seconds": seconds, "conversation_active": bool(conversing), "elapsed": self.elapsed},
+            )
+
+    def _world_operation(self, operation, values):
+        if operation == "environment":
+            self.world.change_environment(values)
+        elif operation == "place":
+            self.world.go_to(values)
+        elif operation == "move":
+            self.world.move_to(values)
+        elif operation == "activity":
+            self.world.set_activity(values)
+        elif operation == "drink":
+            self.world.drink()
+        else:
+            raise ValueError("部屋の操作が正しくありません。")
+
+    def world_operation(self, operation, values=None):
+        with self.lock:
+            self._world_operation(operation, values)
+            self.store.append("world_operation", {"operation": operation, "values": values})
+
+    def dialogue_context(self, query):
+        with self.lock:
+            return {"memories": self.memory.context(query), "virtual_world": self.world.context()}
+
     def checkpoint(self, initial=False):
         with self.lock:
             return self.store.snapshot(
@@ -234,6 +278,7 @@ class Session:
                     "elapsed": self.elapsed,
                     "epoch": self.epoch,
                     "turns": list(self.turns.values()),
+                    "world": self.world.model_dump(),
                 },
                 initial=initial,
             )
@@ -253,6 +298,7 @@ class Session:
                         "failed": sum(m["attempts"] >= 2 for m in self.memory.pending()),
                         "revision": self.memory.revision,
                     },
+                    "world": self.world.context(),
                 }
             )
 
