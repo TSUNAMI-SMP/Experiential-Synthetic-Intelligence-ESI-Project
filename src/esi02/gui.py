@@ -1,6 +1,7 @@
 """Development observer for conversation. Final desktop/avatar UI is a later required stage."""
 
 import math
+from pathlib import Path
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
 from esi.devices import audio_devices, identity, load_preferences, resolve_device, save_preferences
 from esi.icons import icon
 from esi02.runtime import Runtime
+from esi02.session import Session
 
 PHASES = {
     "stopped": "停止中",
@@ -35,10 +37,11 @@ PHASES = {
 
 
 class Window(QMainWindow):
-    def __init__(self, session, backend=None):
+    def __init__(self, session, backend=None, services=None):
         super().__init__()
         self.session, self.runtime = session, None
         self.backend = backend or {"device": "unknown", "verified": False}
+        self.services = services
         self.ui_error = ""
         self.preferences_path = session.store.path.parent / "audio-devices.json"
         try:
@@ -66,9 +69,22 @@ class Window(QMainWindow):
         save = QPushButton("保存")
         save.setIcon(icon("save"))
         save.clicked.connect(self.save)
+        open_save = QPushButton("セーブを開く")
+        open_save.setIcon(icon("folder"))
+        open_save.clicked.connect(self.open_save)
+        memories = QPushButton("記憶を見る・直す")
+        memories.clicked.connect(self.open_memories)
         recording = QPushButton("録音ファイルを入力")
         recording.clicked.connect(self.recording)
-        for widget in (self.start_button, self.mic_button, self.on_start, save, recording):
+        for widget in (
+            self.start_button,
+            self.mic_button,
+            self.on_start,
+            save,
+            open_save,
+            memories,
+            recording,
+        ):
             controls.addWidget(widget)
         controls.addStretch()
         layout.addLayout(controls)
@@ -95,6 +111,8 @@ class Window(QMainWindow):
         self.capture = QLabel()
         self.capture.setWordWrap(True)
         layout.addWidget(self.capture)
+        self.memory_summary = QLabel()
+        layout.addWidget(self.memory_summary)
         self.conversation = QTextEdit()
         self.conversation.setReadOnly(True)
         layout.addWidget(self.conversation, 1)
@@ -219,6 +237,84 @@ class Window(QMainWindow):
         if path:
             self.send("recording", path)
 
+    def memory_action(self, operation, data):
+        try:
+            if self.runtime:
+                return self.send("memory", (operation, data))
+            self.session.memory_operation(operation, data)
+            self.ui_error = ""
+            return True
+        except Exception as exc:
+            self.ui_error = str(exc)
+            self.error.setText(self.ui_error)
+            return False
+
+    def open_memories(self):
+        from esi02.memory_gui import MemoryDialog
+
+        dialog = MemoryDialog(self)
+        dialog.exec()
+        dialog.deleteLater()
+
+    def switch_save(self, path):
+        from esi02.migration import validate_save
+
+        path = Path(path)
+        result = validate_save(path)
+        if result["release"] != "ESI-02":
+            raise ValueError("ESI-01は新しい名前のコピーへ移行して開いてください。")
+        if path.samefile(self.session.store.path):
+            return
+        candidate = Session(path)  # validate/restore before stopping the current working session
+        try:
+            if self.runtime:
+                self.toggle()
+            if self.services:
+                self.services.prepare(candidate.settings)
+                self.backend = self.services.backend
+        except Exception:
+            candidate.close()
+            raise
+        old, self.session = self.session, candidate
+        old.close()
+        self.preferences_path = path.parent / "audio-devices.json"
+        try:
+            self.preferences = load_preferences(self.preferences_path)
+        except (OSError, ValueError):
+            self.preferences = {"input": None, "output": None, "microphone_on_start": True}
+        self.on_start.setChecked(self.preferences["microphone_on_start"])
+        self.input_devices.clear()
+        self.output_devices.clear()
+        self.refresh_devices()
+        self.ui_error = ""
+        self.refresh()
+
+    def open_save(self):
+        from esi02.migration import migrate_esi01, validate_save
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, "セーブを開く", str(self.session.store.path.parent), "ESIのセーブ (*.sqlite3 *.db)"
+        )
+        if not path:
+            return
+        try:
+            result = validate_save(path)
+            if result["release"] == "ESI-01":
+                destination, _ = QFileDialog.getSaveFileName(
+                    self,
+                    "ESI-02へのコピーを保存（元のセーブは残ります）",
+                    str(Path(path).with_name(Path(path).stem + "-ESI-02.sqlite3")),
+                    "ESI-02のセーブ (*.sqlite3)",
+                )
+                if not destination:
+                    return
+                migrate_esi01(path, destination, self.session.settings)
+                path = destination
+            self.switch_save(path)
+        except Exception as exc:
+            self.ui_error = f"セーブを開けません：{exc}"
+            self.error.setText(self.ui_error)
+
     def refresh(self):
         view = self.session.view()
         status = view["status"]
@@ -252,6 +348,12 @@ class Window(QMainWindow):
         self.capture.setText(
             f"マイク：{audio.get('device_name', '未接続')} / 聞き取り：{audio.get('recognized_intervals', 0)}件"
             + (" / 音声を言葉に変換中" if audio.get("asr_busy") else "")
+        )
+        memory = view["memory"]
+        self.memory_summary.setText(
+            f"記憶 {memory['count']}件 / 整理待ち {memory['pending']}件"
+            + (f" / 整理に失敗 {memory['failed']}件（記憶画面で確認）" if memory["failed"] else "")
+            + (" / 会話から記憶を整理中" if status.get("memory_phase") == "organizing" else "")
         )
         entries = []
         for turn in view["turns"]:
@@ -287,11 +389,11 @@ class Window(QMainWindow):
         event.accept()
 
 
-def launch(session, backend=None):
+def launch(session, backend=None, services=None):
     from PySide6.QtCore import QEvent
 
     app = QApplication.instance() or QApplication([])
-    window = Window(session, backend)
+    window = Window(session, backend, services)
     window.show()
     result = app.exec()
     window.deleteLater()

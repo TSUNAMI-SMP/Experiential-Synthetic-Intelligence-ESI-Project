@@ -16,10 +16,26 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("gui")
     commands.add_parser("status")
+    migration = commands.add_parser("migrate-esi01")
+    migration.add_argument("source")
     probe = commands.add_parser("gpu-plan")
     probe.add_argument("--executable", required=True)
     probe.add_argument("--model", default="models/qwen3-4b/Qwen3-4B-Q4_K_M.gguf")
     args = parser.parse_args(argv)
+    if args.command == "migrate-esi01":
+        from esi02.migration import migrate_esi01
+
+        result = migrate_esi01(
+            args.source, args.database, Settings.read(args.config) if args.config else None
+        )
+        print(
+            json.dumps(
+                {k: str(v) if isinstance(v, Path) else v for k, v in result.items()},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
     path = Path(args.database)
     settings = (
         Settings.read(args.config) if args.config else inspect_database(path) if path.exists() else Settings()
@@ -47,7 +63,7 @@ def main(argv=None):
     try:
         service.prepare(settings)
         session = Session(path, settings)
-        return launch(session, service.backend)
+        return launch(session, service.backend, service)
     finally:
         service.close()
 

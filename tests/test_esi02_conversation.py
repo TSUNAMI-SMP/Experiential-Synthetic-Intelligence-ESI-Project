@@ -34,7 +34,7 @@ class Speech:
 
 
 class Replies:
-    def stream(self, text, history, cancellation, on_delta, on_sentence):
+    def stream(self, text, history, cancellation, on_delta, on_sentence, context=None):
         cancellation.check()
         reply = "こんにちは。お話しできます。"
         on_delta(reply)
@@ -75,7 +75,7 @@ def test_new_turn_cancels_stale_generation_and_never_voices_old_answer(tmp_path)
     class Blocking:
         calls = 0
 
-        def stream(self, text, history, cancellation, on_delta, on_sentence):
+        def stream(self, text, history, cancellation, on_delta, on_sentence, context=None):
             self.calls += 1
             if self.calls == 1:
                 first_started.set()
@@ -143,7 +143,7 @@ def test_barge_in_cancels_playback_and_stop_checkpoints_without_late_writes(tmp_
 
 def test_llm_failure_is_reported_without_fabricating_a_response(tmp_path):
     class Broken:
-        def stream(self, *args):
+        def stream(self, *args, **kwargs):
             raise ConnectionError("server unavailable")
 
     session = Session(tmp_path / "s.sqlite3", Settings(playback=False, tick_seconds=0.01))
@@ -299,3 +299,16 @@ def test_echo_matching_uses_capture_time_instead_of_delayed_asr_completion(tmp_p
     finally:
         runtime.stop()
         session.close()
+
+
+@pytest.fixture(autouse=True)
+def no_unrequested_network(monkeypatch):
+    class EmptyMemory:
+        def __init__(self, settings):
+            pass
+
+        def extract(self, turn, existing, cancellation):
+            cancellation.check()
+            return {"items": [], "rejected": []}
+
+    monkeypatch.setattr("esi02.runtime.MemoryLLM", EmptyMemory)

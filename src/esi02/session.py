@@ -6,12 +6,46 @@ import sqlite3
 import threading
 from collections import OrderedDict
 from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from esi.models import uid, utc
 from esi.storage import Store
 from esi02.config import Settings
+from esi02.memory import Memory, explicit_candidates
 
 TERMINAL = {"complete", "cancelled", "failed"}
+
+
+class SavedTurn(BaseModel):
+    model_config = ConfigDict(extra="allow", allow_inf_nan=False, strict=True)
+    id: str = Field(min_length=1, max_length=64)
+    epoch: int = Field(ge=1)
+    input: str = Field(max_length=2000)
+    source: str = Field(max_length=100)
+    created_at: str
+    started_elapsed: float = Field(ge=0)
+    stage: Literal["queued", "generating", "synthesizing", "playing", "complete", "cancelled", "failed"]
+    reply: str = Field(max_length=2048)
+    chunks: list[dict] = Field(max_length=32)
+    metrics: dict[str, float | None]
+    error: str | None
+
+
+class SavedState(BaseModel):
+    model_config = ConfigDict(extra="allow", allow_inf_nan=False, strict=True)
+    release: Literal["ESI-02"]
+    elapsed: float = Field(ge=0)
+    epoch: int = Field(ge=0)
+    turns: list[SavedTurn] = Field(max_length=512)
+
+
+def validate_state(state):
+    value = SavedState.model_validate(state)
+    ids = [t.id for t in value.turns]
+    if len(ids) != len(set(ids)) or any(t.epoch > value.epoch for t in value.turns):
+        raise ValueError("セーブの会話番号やIDが整合していません。")
 
 
 def inspect_database(path):
@@ -23,6 +57,15 @@ def inspect_database(path):
         settings = Settings.model_validate(json.loads(row[0]))
         if db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
             raise ValueError("セーブの整合性を確認できません。")
+        snapshot = db.execute("SELECT seq,payload FROM snapshots ORDER BY rowid DESC LIMIT 1").fetchone()
+        if not snapshot:
+            raise ValueError("ESI-02の保存状態がありません。")
+        validate_state(json.loads(snapshot[1]))
+        for (payload,) in db.execute(
+            "SELECT payload FROM records WHERE seq>? AND kind='turn_state' ORDER BY seq LIMIT ?",
+            (snapshot[0], settings.max_records + 1),
+        ):
+            SavedTurn.model_validate(json.loads(payload)["turn"])
         return settings
     finally:
         db.close()
@@ -42,6 +85,7 @@ class Session:
         self.status = {"running": False, "phase": "stopped", "microphone": "stopped"}
         self.agent_id = self.store.meta("agent_id")
         try:
+            self.memory = Memory(self.store)
             saved = self.store.load_snapshot()
             if saved:
                 state = saved["state"]
@@ -55,10 +99,15 @@ class Session:
                         turn = record["payload"]["turn"]
                         self.turns[turn["id"]] = turn
                         self.epoch = max(self.epoch, turn["epoch"])
+                        self.elapsed = max(self.elapsed, record["payload"].get("elapsed", self.elapsed))
                 for turn in self.turns.values():
                     if turn["stage"] not in TERMINAL:
                         turn["stage"] = "cancelled"
                         turn["cancellation"] = "restart: interrupted work is not resumed automatically"
+                # Recover the small window between a durable turn and its memory queue insertion.
+                for turn in self.turns.values():
+                    if not turn.get("memory_queued"):
+                        self._remember(turn)
             else:
                 self.store.set_meta("esi02_settings", self.settings.model_dump())
             self._prune()
@@ -74,7 +123,7 @@ class Session:
                 raise RuntimeError("未完了の会話が保存上限を超えました。")
             self.turns.pop(key)
 
-    def create_turn(self, text, source="text", observation_id=None):
+    def create_turn(self, text, source="text", observation_id=None, remember=True):
         if not isinstance(text, str) or len(text) > 2000:
             raise ValueError("入力は2000文字以内にしてください。")
         with self.lock:
@@ -95,8 +144,23 @@ class Session:
             }
             self.turns[turn["id"]] = turn
             self._persist(turn)
+            if remember:
+                self._remember(turn)
+            else:
+                turn["memory_queued"] = True
+                turn["use_in_dialogue_history"] = False
+            self._persist(turn)
             self._prune()
             return copy.deepcopy(turn)
+
+    def _remember(self, turn):
+        try:
+            self.memory.apply(turn, explicit_candidates(turn["input"]))
+            self.memory.queue(turn)
+            turn["memory_queued"] = True
+        except ValueError as exc:
+            # Memory capacity/errors never prevent the ordinary conversation response.
+            self.status["memory_error"] = str(exc)
 
     def _persist(self, turn):
         self.store.append("turn_state", {"turn": copy.deepcopy(turn), "elapsed": self.elapsed})
@@ -115,9 +179,20 @@ class Session:
     def history(self, before_id):
         with self.lock:
             history = []
+            superseded = {
+                m["source_turn_id"]
+                for m in self.memory.entries(include_old=True)
+                if m["status"] == "superseded"
+            }
             for turn in self.turns.values():
                 if turn["id"] == before_id:
                     break
+                if turn["epoch"] <= self.memory.history_floor:
+                    continue
+                if turn["id"] in superseded:
+                    continue
+                if not turn.get("use_in_dialogue_history", True):
+                    continue
                 history.append({"role": "user", "content": turn["input"] or "（音声を聞き取れなかった）"})
                 if turn["reply"] and turn["stage"] == "complete":
                     history.append({"role": "assistant", "content": turn["reply"]})
@@ -128,6 +203,28 @@ class Session:
                             {"role": "assistant", "content": delivered + "（この発声は中断された）"}
                         )
             return history[-self.settings.history_pairs * 2 :]
+
+    def memory_operation(self, operation, data=None):
+        data = data or {}
+        with self.lock:
+            if operation == "edit":
+                self.memory.edit(
+                    data["id"],
+                    data["value"],
+                    self.epoch,
+                    data.get("trust", "confirmed"),
+                    data.get("resolved", False),
+                )
+            elif operation == "add":
+                self.memory.add_manual(data["kind"], data["label"], data["value"], self.epoch)
+            elif operation == "delete":
+                self.memory.delete(data["id"], self.epoch)
+            elif operation == "retry":
+                self.memory.retry()
+            else:
+                raise ValueError("記憶の操作が正しくありません。")
+            self.status["memory_error"] = ""
+            self.status["notice"] = "記憶を更新して保存しました。"
 
     def checkpoint(self, initial=False):
         with self.lock:
@@ -150,6 +247,12 @@ class Session:
                     "elapsed": self.elapsed,
                     "status": self.status,
                     "turns": list(self.turns.values())[-12:],
+                    "memory": {
+                        "count": len(self.memory.entries()),
+                        "pending": len(self.memory.pending()),
+                        "failed": sum(m["attempts"] >= 2 for m in self.memory.pending()),
+                        "revision": self.memory.revision,
+                    },
                 }
             )
 
