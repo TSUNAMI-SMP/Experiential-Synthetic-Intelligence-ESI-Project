@@ -34,13 +34,18 @@ def read_preferences(path):
 def write_preferences(path, preferences):
     # Revalidate mutations, and replace atomically without a shared .tmp filename.
     value = DesktopPreferences.model_validate(preferences.model_dump())
+    write_json(path, value.model_dump())
+
+
+def write_json(path, value):
+    """Atomic local UI preference storage; values must be validated by their caller."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as file:
             temporary = Path(file.name)
-            json.dump(value.model_dump(), file, ensure_ascii=False, indent=2)
+            json.dump(value, file, ensure_ascii=False, indent=2)
             file.flush()
             os.fsync(file.fileno())
         temporary.replace(path)

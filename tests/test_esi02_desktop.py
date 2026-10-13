@@ -375,3 +375,68 @@ def test_same_explicit_configuration_can_reopen_save_after_json_number_roundtrip
         assert reopened.settings.fingerprint == Settings.model_validate(settings.model_dump()).fingerprint
     finally:
         reopened.close()
+
+
+def test_speaker_test_uses_selected_device_without_starting_ai_or_creating_experience(
+    app, tmp_path, monkeypatch
+):
+    from esi02 import gui
+
+    window = make_window(tmp_path, monkeypatch)
+    started, release = threading.Event(), threading.Event()
+    calls = []
+    device = {"index": 9, "name": "Speaker", "hostapi": "WASAPI", "inputs": 0, "outputs": 2}
+    monkeypatch.setattr(gui, "audio_devices", lambda: [device])
+
+    def tone(selected, stop):
+        calls.append(selected)
+        started.set()
+        assert release.wait(2)
+        return not stop.is_set()
+
+    monkeypatch.setattr(gui, "test_tone", tone)
+    try:
+        window.refresh_devices()
+        window.output_devices.setCurrentIndex(1)
+        window.sound_test.click()
+        assert started.wait(1) and calls == [9]
+        window.desktop_microphone()  # The floating button also respects the routing-test lock.
+        assert window.runtime is None and "音のテストが終わってから" in window.error.text()
+        assert not window.output_devices.isEnabled()
+        release.set()
+        until(app, lambda: window.audio_test is None)
+        assert window.output_devices.isEnabled()
+        assert "テスト音を出力" in window.routing_hint.text()
+        assert not window.session.turns and not window.session.memory.entries()
+        assert sum(window.session.brain.view(window.session.world)["counts"].values()) == 0
+        assert not window.error.text()
+    finally:
+        release.set()
+        dispose(window, app)
+
+
+def test_disappeared_speaker_is_reported_and_close_cancels_pending_test(app, tmp_path, monkeypatch):
+    from esi02 import gui
+
+    window = make_window(tmp_path, monkeypatch)
+    started = threading.Event()
+    stops = []
+    device = {"index": 9, "name": "Speaker", "hostapi": "WASAPI", "inputs": 0, "outputs": 2}
+    window.output_devices.addItem("Speaker", device)
+    window.output_devices.setCurrentIndex(1)
+    window.test_output()
+    assert window.audio_test is None and "音声機器が見つからない" in window.error.text()
+    monkeypatch.setattr(gui, "audio_devices", lambda: [device])
+
+    def tone(selected, stop):
+        stops.append(stop)
+        started.set()
+        assert stop.wait(2)
+        return False
+
+    monkeypatch.setattr(gui, "test_tone", tone)
+    window.test_output()
+    assert started.wait(1)
+    future = window.audio_test
+    dispose(window, app)
+    assert stops[0].is_set() and future.result(timeout=2) is False

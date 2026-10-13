@@ -18,6 +18,25 @@ class Services(OriginalServices):
         self.backend = {"device": "unknown", "verified": False}
         self.executable_override = executable
         self.log = self.root / "data/esi02/logs/llama.log"
+        self.language_signature = None
+
+    @staticmethod
+    def signature(settings):
+        return (
+            settings.llm_url,
+            settings.llm_model,
+            settings.llm_device,
+            settings.context_tokens,
+            settings.cpu_threads,
+            settings.gpu_reserve_mb,
+        )
+
+    def stop_owned(self):
+        had_owned = bool(self.owned)
+        super().stop_owned()
+        self.language_signature = None
+        if had_owned:
+            self.backend = {"device": "unknown", "verified": False, "reason": "言語ソフトを停止しました。"}
 
     def _llama_executable(self):
         if self.executable_override:
@@ -25,15 +44,15 @@ class Services(OriginalServices):
         name = "llama-server.exe" if os.name == "nt" else "llama-server"
         choices = [
             self.root / "llama-cuda" / name,
-            self.root / "llama" / name,
             self.root / "llama-esi02-cpu" / name,
+            self.root / "llama" / name,
         ]
         return next((p for p in choices if p.is_file()), None)
 
     def _cpu_executable(self, fallback):
         name = "llama-server.exe" if os.name == "nt" else "llama-server"
         return next(
-            (p for p in [self.root / "llama" / name, self.root / "llama-esi02-cpu" / name] if p.is_file()),
+            (p for p in [self.root / "llama-esi02-cpu" / name, self.root / "llama" / name] if p.is_file()),
             fallback,
         )
 
@@ -67,9 +86,11 @@ class Services(OriginalServices):
                     "plan": placement.dump(),
                     "source": "owned_process",
                     "log": str(self.log),
+                    "reason": placement.reason,
                 }
                 if placement.layers and not self.backend["verified"]:
                     raise RuntimeError("GPUへの読み込みを確認できませんでした。")
+                self.language_signature = self.signature(settings)
                 return
             self.cancel.wait(0.25)
         raise RuntimeError(
@@ -79,8 +100,16 @@ class Services(OriginalServices):
     def ensure_engine(self, settings, kind):
         if kind != "llama":
             return super().ensure_engine(settings, kind)
+        owns_language = any(p.poll() is None for p in self.owned)
+        if owns_language and self.language_signature != self.signature(settings):
+            # A changed saved context/device must not silently reuse the old process settings.
+            self.stop_owned()
+            owns_language = False
         if self.alive(settings, "llama"):
             self.ensure_language(settings)
+            if owns_language and self.backend.get("source") == "owned_process":
+                self.notify("ESIが起動した言語ソフトを引き続き利用します。")
+                return
             if settings.llm_device == "cuda":
                 raise RuntimeError(
                     "起動済みの言語ソフトのGPU使用を確認できません。一度そのソフトを閉じ、ESIから起動してください。"

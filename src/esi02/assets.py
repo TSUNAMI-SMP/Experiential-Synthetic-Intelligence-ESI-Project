@@ -2,7 +2,6 @@
 
 import hashlib
 import os
-import shutil
 import tempfile
 import urllib.request
 import zipfile
@@ -28,7 +27,7 @@ BINARIES = {
 }
 
 
-def download(url, path, digest):
+def download(url, path, digest, notify=lambda message: None, cancel=None):
     path = Path(path)
     if path.exists():
         with path.open("rb") as stream:
@@ -38,8 +37,19 @@ def download(url, path, digest):
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_suffix(path.suffix + ".partial")
     try:
-        with urllib.request.urlopen(url, timeout=120) as response, partial.open("wb") as stream:
-            shutil.copyfileobj(response, stream, 1024 * 1024)
+        with urllib.request.urlopen(url, timeout=30) as response, partial.open("wb") as stream:
+            received, reported = 0, 0
+            while True:
+                if cancel is not None and cancel.is_set():
+                    raise RuntimeError("準備を中止しました。")
+                block = response.read(1024 * 1024)
+                if not block:
+                    break
+                stream.write(block)
+                received += len(block)
+                if received - reported >= 32 * 1024 * 1024:
+                    notify(f"{path.name}：{received / 1024**2:.0f} MBを受信しました…")
+                    reported = received
         with partial.open("rb") as stream:
             if hashlib.file_digest(stream, "sha256").hexdigest() != digest:
                 raise ValueError("言語ソフトのハッシュが一致しません。")
@@ -67,7 +77,7 @@ def unpack(archive, destination):
         source.extractall(destination)
 
 
-def install_llama(root, device="cuda", notify=print):
+def install_llama(root, device="cuda", notify=print, cancel=None):
     if os.name != "nt":
         raise RuntimeError("この自動導入はWindows x64用です。")
     if device not in BINARIES:
@@ -83,8 +93,14 @@ def install_llama(root, device="cuda", notify=print):
             notify(f"{name} を公式配布から取得しています…")
             archive = Path(temporary) / name
             download(
-                f"https://github.com/ggml-org/llama.cpp/releases/download/b11429/{name}", archive, digest
+                f"https://github.com/ggml-org/llama.cpp/releases/download/b11429/{name}",
+                archive,
+                digest,
+                notify=notify,
+                cancel=cancel,
             )
+            if cancel is not None and cancel.is_set():
+                raise RuntimeError("準備を中止しました。")
             unpack(archive, staging)
         if not (staging / "llama-server.exe").is_file():
             raise ValueError("言語ソフトの実行ファイルが見つかりません。")

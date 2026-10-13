@@ -1,5 +1,6 @@
 """Select CUDA only when hardware AND the inference binary support it."""
 
+import os
 import re
 import subprocess
 from dataclasses import asdict, dataclass
@@ -28,6 +29,7 @@ class Placement:
 
 def nvidia_devices():
     try:
+        options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
         result = subprocess.run(
             [
                 "nvidia-smi",
@@ -37,6 +39,7 @@ def nvidia_devices():
             capture_output=True,
             text=True,
             timeout=5,
+            **options,
         )
         if result.returncode:
             return [], "NVIDIAドライバーからGPU情報を取得できません。"
@@ -54,8 +57,14 @@ def nvidia_devices():
 
 def llama_devices(executable):
     try:
+        options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
         result = subprocess.run(
-            [str(executable), "--list-devices"], capture_output=True, text=True, errors="replace", timeout=10
+            [str(executable), "--list-devices"],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=10,
+            **options,
         )
         if result.returncode:
             return [], "言語ソフトのGPU対応を確認できません。"

@@ -1,9 +1,11 @@
 """ESI-02 development UI and independent desktop controls."""
 
 import math
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -22,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from esi.adapters import test_tone
 from esi.devices import audio_devices, identity, load_preferences, resolve_device, save_preferences
 from esi.icons import icon
 from esi02.desktop import DesktopViews
@@ -31,11 +34,16 @@ from esi02.session import Session
 
 
 class Window(QMainWindow):
+    save_changed = Signal(str)
+
     def __init__(self, session, backend=None, services=None):
         super().__init__()
         self.session, self.runtime = session, None
         self.backend = backend or {"device": "unknown", "verified": False}
         self.services = services
+        self.audio_test = None
+        self.audio_test_stop = threading.Event()
+        self.audio_test_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="esi02-output-test")
         self.ui_error = ""
         self.preferences_path = session.store.path.parent / "audio-devices.json"
         try:
@@ -106,7 +114,15 @@ class Window(QMainWindow):
         self.reload = QPushButton("機器一覧を更新")
         self.reload.clicked.connect(self.refresh_devices)
         routing.addWidget(self.reload)
+        self.sound_test = QPushButton("音のテスト")
+        self.sound_test.clicked.connect(self.test_output)
+        routing.addWidget(self.sound_test)
         layout.addLayout(routing)
+        self.routing_hint = QLabel(
+            "機器の変更と音のテストは停止中にできます。音量が動くマイクを選んでください。"
+        )
+        self.routing_hint.setWordWrap(True)
+        layout.addWidget(self.routing_hint)
         self.hardware = QLabel()
         self.hardware.setWordWrap(True)
         layout.addWidget(self.hardware)
@@ -231,7 +247,7 @@ class Window(QMainWindow):
             self.runtime = None
 
     def refresh_devices(self):
-        if self.runtime:
+        if self.runtime or self.audio_test:
             return
         try:
             devices = audio_devices()
@@ -260,6 +276,10 @@ class Window(QMainWindow):
             self.error.setText(self.ui_error)
 
     def toggle(self, microphone=None):
+        if self.audio_test:
+            self.ui_error = "音のテストが終わってから開始してください。"
+            self.error.setText(self.ui_error)
+            return
         self.reap_runtime()
         if self.runtime:
             try:
@@ -290,6 +310,20 @@ class Window(QMainWindow):
                 self.ui_error = str(exc)
                 self.error.setText(self.ui_error)
         self.refresh()
+
+    def test_output(self):
+        if self.runtime or self.audio_test:
+            return
+        try:
+            device = resolve_device(self.output_devices.currentData(), audio_devices(), "outputs")
+            self.audio_test_stop.clear()
+            self.audio_test = self.audio_test_pool.submit(test_tone, device, self.audio_test_stop)
+            self.routing_hint.setText("選んだスピーカーで、短いテスト音を再生しています。")
+            self.ui_error = ""
+            self.refresh()
+        except Exception as exc:
+            self.ui_error = f"音のテストを開始できません：{exc}"
+            self.error.setText(self.ui_error)
 
     def send(self, name, data=None):
         if not self.runtime:
@@ -431,6 +465,8 @@ class Window(QMainWindow):
     def switch_save(self, path):
         from esi02.migration import validate_save
 
+        if self.audio_test:
+            raise RuntimeError("音のテストが終わってからセーブを開いてください。")
         path = Path(path)
         result = validate_save(path)
         if result["release"] != "ESI-02":
@@ -447,6 +483,8 @@ class Window(QMainWindow):
                 self.services.prepare(candidate.settings)
                 self.backend = self.services.backend
         except Exception:
+            if self.services:
+                self.backend = self.services.backend
             candidate.close()
             raise
         old, self.session = self.session, candidate
@@ -465,6 +503,7 @@ class Window(QMainWindow):
         self.refresh_devices()
         self.ui_error = ""
         self.refresh()
+        self.save_changed.emit(str(path.resolve()))
 
     def open_save(self):
         from esi02.migration import migrate_esi01, validate_save
@@ -494,6 +533,18 @@ class Window(QMainWindow):
 
     def refresh(self):
         self.reap_runtime()
+        if self.audio_test and self.audio_test.done():
+            try:
+                played = self.audio_test.result()
+                self.ui_error = ""
+                self.routing_hint.setText(
+                    "テスト音を出力しました。聞こえなければ別のスピーカーを選んでください。"
+                    if played
+                    else "音のテストを中断しました。"
+                )
+            except Exception as exc:
+                self.ui_error = f"テスト音を再生できません：{exc}"
+            self.audio_test = None
         view = self.session.view()
         status = view["status"]
         self.world_panel.refresh(view["world"])
@@ -502,8 +553,9 @@ class Window(QMainWindow):
         self.phase.setText(phase_text)
         self.phase_icon.setPixmap(icon(symbol).pixmap(32, 32))
         running = self.runtime is not None
-        for widget in (self.input_devices, self.output_devices, self.reload, self.on_start):
-            widget.setEnabled(not running)
+        for widget in (self.input_devices, self.output_devices, self.reload, self.on_start, self.sound_test):
+            widget.setEnabled(not running and not self.audio_test)
+        self.start_button.setEnabled(not self.audio_test)
         self.mic_button.setEnabled(running)
         self.start_button.setText("停止" if running else "開始")
         self.start_button.setIcon(icon("stop" if running else "start"))
@@ -556,7 +608,16 @@ class Window(QMainWindow):
                 if metrics.get("first_token_seconds") is not None
                 else ""
             )
-            entries.append(f"［{turn['stage']}{timing}］")
+            stage = {
+                "queued": "返答の準備中",
+                "generating": "文章を考えています",
+                "synthesizing": "声を作っています",
+                "playing": "発声中",
+                "complete": "返答を完了",
+                "cancelled": "中断しました",
+                "failed": "処理に問題がありました",
+            }.get(turn["stage"], turn["stage"])
+            entries.append(f"［{stage}{timing}］")
             if turn["chunks"] and not any(c.get("played") for c in turn["chunks"]):
                 entries.append("音声ファイルを保存（スピーカー再生は未確認・OFF・中断）")
         content = "\n\n".join(entries)
@@ -574,6 +635,7 @@ class Window(QMainWindow):
 
     def closeEvent(self, event):
         self.timer.stop()
+        self.audio_test_stop.set()
         if self.runtime:
             try:
                 self.runtime.stop()
@@ -585,6 +647,7 @@ class Window(QMainWindow):
                 return
             self.runtime = None
         self.desktop.shutdown()
+        self.audio_test_pool.shutdown(wait=False, cancel_futures=True)
         self.session.close()
         event.accept()
 
