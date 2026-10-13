@@ -80,6 +80,10 @@ class Launcher(QWidget):
         self.window_factory = window_factory
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="esi02-startup")
         self.future = None
+        self.diagnostics_pool = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="esi02-startup-diagnostic"
+        )
+        self.diagnostics_future = None
         self.window = None
         self.closing = False
         self.finished = False
@@ -122,9 +126,14 @@ class Launcher(QWidget):
         logs.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.data / "logs"))))
         aivis_download = QPushButton("AivisSpeechの公式配布")
         aivis_download.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://aivis-project.com/")))
-        for button in (self.offline, logs, aivis_download):
+        self.diagnostics_button = QPushButton("診断を保存")
+        self.diagnostics_button.clicked.connect(self.save_diagnostics)
+        for button in (self.offline, logs, aivis_download, self.diagnostics_button):
             bottom.addWidget(button)
         layout.addLayout(bottom)
+        self.diagnostics_hint = QLabel()
+        self.diagnostics_hint.setWordWrap(True)
+        layout.addWidget(self.diagnostics_hint)
         self.setStyleSheet(
             "QWidget {background: #152332; color: #edf5ff; font-size: 13px;}"
             "QPushButton {background: #29465e; border: 0; border-radius: 6px; padding: 8px;}"
@@ -211,6 +220,13 @@ class Launcher(QWidget):
         return settings
 
     def poll(self):
+        if self.diagnostics_future and self.diagnostics_future.done():
+            completed, self.diagnostics_future = self.diagnostics_future, None
+            try:
+                self.diagnostics_hint.setText("診断を保存しました：" + str(completed.result()))
+            except Exception as exc:
+                self.diagnostics_hint.setText(f"診断を保存できません：{exc}")
+            self.diagnostics_button.setEnabled(not self.closing)
         if not self.closing:
             while not self.messages.empty():
                 self.status.setText(self.messages.get_nowait())
@@ -233,6 +249,22 @@ class Launcher(QWidget):
         except (OSError, ValueError) as exc:
             self.window.ui_error = f"次回の起動用の保存先を記録できません：{exc}"
         self.update_save_label()
+
+    def save_diagnostics(self):
+        if self.diagnostics_future or self.closing:
+            return
+        from esi02.diagnostics import collect_from_paths, save_report
+
+        root, path = self.root, self.save_path
+        config = root / "config/esi02-windows.toml" if not path.exists() else None
+
+        def collect():
+            report = collect_from_paths(root, path, config)
+            return save_report(root, report)
+
+        self.diagnostics_hint.setText("音声機器と接続を確認しています…")
+        self.diagnostics_button.setEnabled(False)
+        self.diagnostics_future = self.diagnostics_pool.submit(collect)
 
     def open_main(self, settings, offline=False):
         session = Session(self.save_path, settings)
@@ -307,6 +339,7 @@ class Launcher(QWidget):
             self.timer.stop()
             self.services.close()
             self.pool.shutdown(wait=False, cancel_futures=True)
+            self.diagnostics_pool.shutdown(wait=False, cancel_futures=True)
 
     def closeEvent(self, event):
         if self.future and not self.future.done():

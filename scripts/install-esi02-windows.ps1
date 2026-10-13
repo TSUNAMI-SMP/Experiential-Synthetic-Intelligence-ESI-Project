@@ -2,6 +2,11 @@
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $EsiRoot = Split-Path $PSScriptRoot -Parent
 Set-Location -LiteralPath $EsiRoot
+$EsiLogs = Join-Path $EsiRoot "data\esi02\logs"
+New-Item -ItemType Directory -Force -Path $EsiLogs | Out-Null
+$EsiSetupLog = Join-Path $EsiLogs ("install-" + (Get-Date -Format "yyyyMMdd-HHmmss-fff") + ".log")
+Start-Transcript -Path $EsiSetupLog | Out-Null
+try {
 $EsiEnvironment = Join-Path $EsiRoot ".venv-esi02"
 $EsiPython = Join-Path $EsiEnvironment "Scripts\python.exe"
 if (![Environment]::Is64BitOperatingSystem) { throw "ESI-02には64ビットのWindowsが必要です。" }
@@ -38,3 +43,7 @@ $env:PYTHONPATH = Join-Path $EsiRoot "src"
 & $EsiPython -c "import sys, httpx, numpy, pydantic, sounddevice, live2d; from PySide6.QtWidgets import QApplication; from esi02.config import Settings; assert sys.version_info[:2] == (3, 12); assert sys.maxsize > 2**32; print('ESI-02 libraries imported successfully')"
 if ($LASTEXITCODE -ne 0) { throw "ライブラリの読み込みを確認できませんでした。" }
 Write-Output "ESI-02の初回準備が終わりました。『ESI-02を起動.cmd』をダブルクリックしてください。AIデータは起動画面から準備できます。"
+} finally {
+    Stop-Transcript | Out-Null
+    Write-Output "導入の記録：$EsiSetupLog"
+}

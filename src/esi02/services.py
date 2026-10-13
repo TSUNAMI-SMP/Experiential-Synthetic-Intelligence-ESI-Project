@@ -19,6 +19,21 @@ class Services(OriginalServices):
         self.executable_override = executable
         self.log = self.root / "data/esi02/logs/llama.log"
         self.language_signature = None
+        self.language_process = None
+
+    def current_backend(self, settings):
+        backend = dict(self.backend)
+        if backend.get("source") == "owned_process" and (
+            self.language_process is None
+            or self.language_process.poll() is not None
+            or self.language_signature != self.signature(settings)
+        ):
+            backend.update(
+                device="unknown",
+                verified=False,
+                reason="このセーブの言語ソフトの動作を現在確認できません。接続を確認し直してください。",
+            )
+        return backend
 
     @staticmethod
     def signature(settings):
@@ -35,6 +50,7 @@ class Services(OriginalServices):
         had_owned = bool(self.owned)
         super().stop_owned()
         self.language_signature = None
+        self.language_process = None
         if had_owned:
             self.backend = {"device": "unknown", "verified": False, "reason": "言語ソフトを停止しました。"}
 
@@ -68,6 +84,7 @@ class Services(OriginalServices):
                     command, cwd=self.root, stdout=stream, stderr=subprocess.STDOUT, **options
                 )
             self.owned.append(process)
+            self.language_process = process
         return process
 
     def _start_llama(self, settings, executable, model, placement):
@@ -100,7 +117,7 @@ class Services(OriginalServices):
     def ensure_engine(self, settings, kind):
         if kind != "llama":
             return super().ensure_engine(settings, kind)
-        owns_language = any(p.poll() is None for p in self.owned)
+        owns_language = bool(self.language_process and self.language_process.poll() is None)
         if owns_language and self.language_signature != self.signature(settings):
             # A changed saved context/device must not silently reuse the old process settings.
             self.stop_owned()

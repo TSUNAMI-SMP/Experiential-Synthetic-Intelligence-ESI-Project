@@ -52,6 +52,8 @@ class Window(QMainWindow):
         self.audio_test = None
         self.audio_test_stop = threading.Event()
         self.audio_test_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="esi02-output-test")
+        self.diagnostics_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="esi02-diagnostics")
+        self.diagnostics_future = None
         self.ui_error = ""
         self.preferences_path = session.store.path.parent / "audio-devices.json"
         try:
@@ -233,6 +235,17 @@ class Window(QMainWindow):
         self.error.setWordWrap(True)
         self.error.setStyleSheet("color: #f9b4bf")
         layout.addWidget(self.error)
+        diagnostic_row = QHBoxLayout()
+        self.diagnostics_hint = QLabel()
+        self.diagnostics_hint.setWordWrap(True)
+        diagnostic_row.addWidget(self.diagnostics_hint, 1)
+        self.diagnostics_button = QPushButton("診断を保存")
+        self.diagnostics_button.setToolTip(
+            "GPU・音声機器・接続・動作状態を保存します。会話や録音は含みません。"
+        )
+        self.diagnostics_button.clicked.connect(self.save_diagnostics)
+        diagnostic_row.addWidget(self.diagnostics_button)
+        layout.addLayout(diagnostic_row)
         self.setStyleSheet(
             "QWidget {background: #152332; color: #edf5ff; font-size: 13px;}"
             "QPushButton {background: #29465e; border: 0; border-radius: 6px; padding: 8px;}"
@@ -265,7 +278,7 @@ class Window(QMainWindow):
         self.activateWindow()
 
     def desktop_microphone(self):
-        if self.preparation or not self.connection_ready:
+        if self.preparation or (not self.connection_ready and self.runtime is None):
             return
         self.reap_runtime()
         if self.runtime:
@@ -310,7 +323,7 @@ class Window(QMainWindow):
             self.error.setText(self.ui_error)
 
     def toggle(self, microphone=None):
-        if self.preparation or not self.connection_ready:
+        if self.preparation or (not self.connection_ready and self.runtime is None):
             self.ui_error = "接続の準備が終わってから開始してください。"
             self.error.setText(self.ui_error)
             return
@@ -709,6 +722,7 @@ class Window(QMainWindow):
             self.error.setText(self.ui_error)
 
     def refresh(self):
+        self.poll_diagnostics()
         self.poll_preparation()
         if not self.preparation:
             self.reap_runtime()
@@ -733,6 +747,13 @@ class Window(QMainWindow):
         self.phase_icon.setPixmap(icon(symbol).pixmap(32, 32))
         running = self.runtime is not None
         preparing = self.preparation is not None
+        backend = (
+            self.services.current_backend(self.session.settings)
+            if hasattr(self.services, "current_backend")
+            else self.backend
+        )
+        if not preparing and backend.get("source") == "owned_process" and not backend.get("verified"):
+            self.connection_ready = False
         self.cancel_preparation_button.setVisible(preparing)
         self.cancel_preparation_button.setEnabled(preparing and not self.preparation_cancel.is_set())
         self.retry_connection_button.setVisible(bool(self.services) and not self.connection_ready)
@@ -740,11 +761,12 @@ class Window(QMainWindow):
         self.open_save_button.setEnabled(not preparing and not self.audio_test)
         for widget in (self.input_devices, self.output_devices, self.reload, self.on_start, self.sound_test):
             widget.setEnabled(not running and not self.audio_test and not preparing)
-        self.start_button.setEnabled(not self.audio_test and not preparing and self.connection_ready)
+        self.start_button.setEnabled(
+            not self.audio_test and not preparing and (self.connection_ready or running)
+        )
         self.mic_button.setEnabled(running)
         self.start_button.setText("停止" if running else "開始")
         self.start_button.setIcon(icon("stop" if running else "start"))
-        backend = self.backend
         mode = (
             "GPU"
             if backend.get("device") == "cuda" and backend.get("verified")
@@ -830,11 +852,51 @@ class Window(QMainWindow):
         else:
             self.error.clear()
         self.desktop.refresh(running, mic, symbol, phase_text, problem)
-        self.desktop.microphone.start_action.setEnabled(not preparing and self.connection_ready)
+        self.desktop.microphone.start_action.setEnabled(not preparing and (self.connection_ready or running))
         self.desktop.microphone.mic_action.setEnabled(not preparing and self.connection_ready)
         self.desktop.microphone.setEnabled(not preparing)
         self.send_button.setEnabled(running)
         self.statusBar().showMessage(f"セーブ：{self.session.store.path.name} / 活動 {view['elapsed']:.1f}秒")
+
+    def save_diagnostics(self):
+        if self.diagnostics_future:
+            return
+        from esi02.diagnostics import collect_report, runtime_observation, save_report
+
+        view = self.session.view()
+        root = getattr(self.services, "root", Path(__file__).resolve().parents[2])
+        backend = (
+            self.services.current_backend(self.session.settings)
+            if hasattr(self.services, "current_backend")
+            else dict(self.backend)
+        )
+        if backend.get("source") == "owned_process" and not hasattr(self.services, "current_backend"):
+            backend.update(device="unknown", verified=False, reason="言語ソフトの動作を現在確認できません。")
+        observation = runtime_observation(view["status"], backend, view["turns"])
+        thread = getattr(self.runtime, "thread", None)
+        observation["asr"]["observation_current"] = bool(thread and thread.is_alive())
+        executable = (
+            self.services._llama_executable() if hasattr(self.services, "_llama_executable") else None
+        )
+        settings, path = self.session.settings.model_copy(deep=True), self.session.store.path
+        selections = {"input": self.input_devices.currentData(), "output": self.output_devices.currentData()}
+
+        def collect():
+            report = collect_report(root, settings, path, selections, observation, executable)
+            return save_report(root, report)
+
+        self.diagnostics_hint.setText("音声機器と接続を確認しています…")
+        self.diagnostics_button.setEnabled(False)
+        self.diagnostics_future = self.diagnostics_pool.submit(collect)
+
+    def poll_diagnostics(self):
+        if self.diagnostics_future and self.diagnostics_future.done():
+            completed, self.diagnostics_future = self.diagnostics_future, None
+            try:
+                self.diagnostics_hint.setText("診断を保存しました：" + str(completed.result()))
+            except Exception as exc:
+                self.diagnostics_hint.setText(f"診断を保存できません：{exc}")
+            self.diagnostics_button.setEnabled(True)
 
     def closeEvent(self, event):
         if self.preparation:
@@ -866,6 +928,7 @@ class Window(QMainWindow):
         self.desktop.shutdown()
         self.audio_test_pool.shutdown(wait=False, cancel_futures=True)
         self.preparation_pool.shutdown(wait=False, cancel_futures=True)
+        self.diagnostics_pool.shutdown(wait=False, cancel_futures=True)
         self.session.store.close()
         event.accept()
 

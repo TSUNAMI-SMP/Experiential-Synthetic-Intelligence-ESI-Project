@@ -169,6 +169,35 @@ def test_offline_memory_view_is_labelled_unverified_and_does_not_start_services(
         dispose(startup, app)
 
 
+def test_startup_diagnostic_runs_independently_of_engine_preparation(app, tmp_path, monkeypatch):
+    from esi02 import diagnostics
+
+    started, release = threading.Event(), threading.Event()
+
+    def collect(root, path, config):
+        started.set()
+        assert release.wait(3)
+        return {"test": True}
+
+    monkeypatch.setattr(diagnostics, "collect_from_paths", collect)
+    startup = make_launcher(tmp_path, monkeypatch)
+    try:
+        startup.save_diagnostics()
+        assert started.wait(1)
+        startup.start()
+        assert startup.services.started.wait(1)
+        assert startup.future and startup.diagnostics_future
+        assert not startup.save_path.exists()
+        release.set()
+        startup.diagnostics_future.result(timeout=3)
+        startup.poll()
+        assert "診断を保存しました" in startup.diagnostics_hint.text()
+        assert startup.future and not startup.save_path.exists()
+    finally:
+        release.set()
+        dispose(startup, app)
+
+
 def test_invalid_launcher_preferences_are_retained_and_not_replaced(app, tmp_path, monkeypatch):
     root = tmp_path / "data/esi02"
     root.mkdir(parents=True)
@@ -331,6 +360,7 @@ def test_owned_gpu_verification_is_kept_for_same_settings_and_context_change_res
     manager.backend = {"source": "owned_process", "device": "cuda", "verified": True}
     process = Process()
     manager.owned.append(process)
+    manager.language_process = process
     monkeypatch.setattr(manager, "alive", lambda *args: process.code is None)
     monkeypatch.setattr(manager, "ensure_language", lambda *args: None)
     started = []

@@ -16,12 +16,31 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("gui")
     commands.add_parser("status")
+    doctor = commands.add_parser("doctor")
+    doctor.add_argument("--output")
+    doctor.add_argument("--verify-models", action="store_true")
+    doctor.add_argument("--executable")
     migration = commands.add_parser("migrate-esi01")
     migration.add_argument("source")
     probe = commands.add_parser("gpu-plan")
     probe.add_argument("--executable", required=True)
     probe.add_argument("--model", default="models/qwen3-4b/Qwen3-4B-Q4_K_M.gguf")
     args = parser.parse_args(argv)
+    if args.command == "doctor":
+        from esi02.diagnostics import collect_from_paths, save_report
+
+        report = collect_from_paths(
+            Path.cwd(),
+            args.database,
+            args.config,
+            executable=args.executable,
+            verify_models=args.verify_models,
+        )
+        if args.output:
+            print("診断を保存しました：" + str(save_report(Path.cwd(), report, args.output)))
+        else:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 0
     if args.command == "migrate-esi01":
         from esi02.migration import migrate_esi01
 
