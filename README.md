@@ -6,7 +6,11 @@ M0〜M3 に対応する初期実装です。マイク・録音・模擬刺激、
 
 音声出力は **AivisSpeech / [凛音エル](https://hub.aivis-project.com/aivm-models/f5017410-fbb5-49e1-97cb-e785f42e15f5)** v1.0.0、初期スタイル「ノーマル」です。モデル UUID・話者 UUID・版・スタイル名を照合して選択し、未導入や不一致の場合は明示的に失敗します。音声モデルのキャラクター説明を ESI の人格として与えることはありません。
 
-**0.1.1** では、マイク・スピーカー選択、出力のテスト音、聞き取り前からの入力音量、処理段階と経過秒数、動作記録を追加しました。「開始時にマイクを使う」は初期値で有効です。最初の画面は「いまの動作」、研究用の数値は「詳しい観察」に分けています。[画面の見方・更新方法](docs/画面と音声の確認.md)を参照してください。
+**0.2.0（システム名はESI-01）** では、ダブルクリック起動、セーブを開くボタン、アイコン付きの進行表示、最前面のアバターと開始・停止／マイク操作を追加しました。立ち絵をドラッグして位置、＋／−で大きさを変更できます。本体を最小化してもアバターは残ります。同梱の凛音エルは背景透過の立ち絵です。**凛音エルの完成したLive2Dモデルは未制作・未同梱**です。書き出し済みのCubismモデルを読み込む表示機能は公式サンプルで検証しました。[更新と使い方](docs/アバターと簡単起動.md)を参照してください。
+
+マイク・スピーカー選択、出力のテスト音、聞き取り前からの入力音量、処理段階と経過秒数、動作記録も利用できます。「開始時にマイクを使う」は初期値で有効です。最初の画面は「いまの動作」、研究用の数値は「詳しい観察」です。[音声の画面の見方](docs/画面と音声の確認.md)も参照してください。
+
+![最前面アバターと操作画面の表示例（模擬状態）](docs/esi-01-desktop.png)
 
 ## このクラウドで起動する
 
@@ -60,6 +64,8 @@ esi --database data/audio.sqlite3 replay --output data/replayed.sqlite3
 - `storage.py`: SQLite WAL と整合したスナップショット。初期/保持境界からの入力コマンドとモデル結果で再生できます。
 - `gui.py`: 音響・状態・共有項目・評価寄与・進行中の行動・結果/学習・技術状態の観察と、研究者専用操作。
 - `devices.py` / `presentation.py`: 実験設定と独立した機器選択の保存、実際の処理状態を日本語で表示。16kHz mono に対応しない機器は検証したネイティブ形式で取得・再生し、音声認識用の16kHz monoに変換します。
+- `desktop.py`: 起動状況を表示しながらローカルサービスを準備。既存エンジンを再利用し、自分で起動したllamaだけを終了します。二重起動を防ぎます。
+- `avatar.py`: 本体と独立した透過・最前面ウィンドウ。立ち絵と実際のCubism MOC3を区別し、モデルを選択できます。`model_probe.py`でネイティブモデルの読込みを別プロセスで事前確認します。
 - `experiments.py`: 訓練と留保を分けた任意記号の測定課題。モデル自己採点を教師に使いません。
 
 意味カテゴリは LLM の推定として独立して保存し、結果予測の特徴に使います。LLM の出力は JSON と参照 ID を検証します。言語入力は観測4件、記憶4件、短い要約までに制限し、詳細音響系列は DB に残します。参照 ID の短縮対応と実際の入出力は `llm_io` に記録します。生成発声は `self_output` であり、外部証拠や正解として自動学習しません。
@@ -81,10 +87,12 @@ M4 の長期自己評価・再処理による傾向学習、映像・YouTube・L
 ## 開発と検証
 
 ```bash
-python -m pip install -e '.[gui,dev]'
+python -m pip install --require-hashes -r requirements.lock
+python -m pip install --require-hashes --no-deps -r requirements-live2d.lock
+python -m pip install --no-deps -e .
 pytest -q -m 'not integration'
 ESI_RUN_INTEGRATION=1 pytest -q  # 実際のローカルモデル・エンジンが必要
 ruff check src tests scripts
 ```
 
-依存関係は `pyproject.toml`、クラウドで導入した全依存の版・ハッシュは `requirements.lock` に固定しています。通常の開発では既存チェックアウトを使用し、新しい worktree は必要ありません。[設計書](docs/ESI-01-design.md)と[検証記録](docs/validation.md)も参照してください。
+依存関係は `pyproject.toml`、版・ハッシュは `requirements.lock` と `requirements-live2d.lock` に固定しています。通常の開発では既存チェックアウトを使用し、新しい worktree は必要ありません。[設計書](docs/ESI-01-design.md)と[検証記録](docs/validation.md)も参照してください。

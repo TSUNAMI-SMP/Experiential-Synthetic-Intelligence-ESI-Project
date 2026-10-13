@@ -1,0 +1,330 @@
+{
+  "release": "ESI-01",
+  "package_version": "0.1.1",
+  "recorded_at_jst": "2026-10-13T08:16:37.460720+09:00",
+  "platform": "Linux-6.18.44-x86_64-with-glibc2.41",
+  "python": "3.12.14 (main, Aug 25 2026, 14:00:49) [Clang 22.1.3 ]",
+  "command": "ESI_RUN_INTEGRATION=1 pytest -q --junitxml=/workspace/esi-environment/validation/esi-01-v0.1.1-final-tests.xml",
+  "exit_code": 0,
+  "tests": 53,
+  "passed": 53,
+  "failed": 0,
+  "errors": 0,
+  "skipped": 0,
+  "integration_tests": 2,
+  "runner_seconds": 70.916,
+  "junit_sha256": "80a74960cb087724c91bd4f36c40d929bbebb0bdf9c958074bbf001e8e270166",
+  "source_hash_method": "SHA-256 of UTF-8 sorted relative-path + NUL + file SHA-256 + newline; docs/generated data excluded",
+  "source_sha256": "fcf4562f5572a3fe8b5c7703c53df3796abff79003be17a2cabb61d67c8ac023",
+  "source_files": {
+    "config/cloud.toml": "71faafffe667e989a3b9b741f1850eb59b02321e08b07f8b23f7238717b3e4ce",
+    "config/windows.toml": "8a30ec7fe67296fb5d85600607937b467c08d620cef0c760cf51a7f6f0cc2bcd",
+    "pyproject.toml": "f4da9bb2d6ed7bd64414c441d4a0c2f531051398ed11c5ffe8b3004718cde191",
+    "requirements.lock": "afbe8fd370f583fe8e455c735688ba1689499fbcb2c716e9551d33e6e3702c9e",
+    "scripts/download-models.py": "197d0899d5da160fd14efb64ef51d3726cc2e50ded674c1abacee7ab2a45c42b",
+    "scripts/install-windows.ps1": "9ff2b312adc58bc67d87baadfee77708492fe255874cc96b71586e1458900ccb",
+    "src/esi/__init__.py": "4e6071cf50252c3e0ba63b39d33f6acd8a29593cc95c6d86ccbc0c897f9632e0",
+    "src/esi/adapters.py": "b8fe0e169ca3ae895059b4d1e5b71f4d73e0115c1b31b8bed3306c889275eb18",
+    "src/esi/audio.py": "73447ec4e76028ad4316bab81fef77f37eef6ea70cef91193c2e64507910abfd",
+    "src/esi/cli.py": "022e2a8f09b25616af64485baff583a6ed0bfe002913c7b795c886a32272f653",
+    "src/esi/core.py": "73bb76ceeca69816fc5afad2d29f44618dc0a76d9faf55b95164f806f044cfb3",
+    "src/esi/devices.py": "d8c11698d5ba95eb74d3ed9cb5e273b1513056938710444488c44c8abc9b646f",
+    "src/esi/experiments.py": "ae62434bfc95a6394f0d653b46119a5a8ddbb3df5e3a3737264b718f46cf19ec",
+    "src/esi/gui.py": "7529aec1c30ec6d437aea5576d6263959fb4e74eac47391614c29d7e819c5b49",
+    "src/esi/learning.py": "984f547e77cb2a8e3e7404d1ace5364851451e529dab3c1040fd6b8639894d66",
+    "src/esi/models.py": "d6ea8d019f6d63c1c94c280d8e5e4f80bad27fe532aa3f7ec2bafea0b1f130f5",
+    "src/esi/presentation.py": "74ba3cfb372a2abf4f3f98232b75cb8e336a9c253e7ffd36056dcb5c33c5627b",
+    "src/esi/runtime.py": "5b486285158d073bf72b5559bddbe92a96ea5243a13b3aca2aca7d006c700f0a",
+    "src/esi/storage.py": "af724b00a4d00155d9e25e532e7f845e1199ea386586f107c8fdd7a3b0712042",
+    "tests/test_aivis.py": "bd5e680967f7872f8cdd426441c9bed484d3565483e2576cc128722fe6e9e3e4",
+    "tests/test_core.py": "55d976087499d41f4a8e62342baab95e9890dd85f60747b0d2f897beb8af6ff9",
+    "tests/test_devices_status.py": "76eb64cd4756196c646f8476a292164e3b6ab57d5777ce6022fcbe59cc916d48",
+    "tests/test_experiments_audio.py": "11a016f7df28beab01c8406478c49d9d4ab0625f02d2fcad2e3b31588bafeccd",
+    "tests/test_integration.py": "8985f1559e0e58ac485d31be7096e28b08eed61c42288f0ec473d3435aae9a56",
+    "tests/test_runtime_gui.py": "89b00beaf40fb0312b35f58777ceb00435d071352283a44938a59c9c89d012c3"
+  },
+  "cases": [
+    {
+      "name": "tests.test_aivis.test_requested_aivis_voice_cannot_silently_fall_back[missing_model]",
+      "seconds": 0.001,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_aivis.test_requested_aivis_voice_cannot_silently_fall_back[wrong_version]",
+      "seconds": 0.001,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_aivis.test_requested_aivis_voice_cannot_silently_fall_back[other_speaker]",
+      "seconds": 0.001,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_aivis.test_requested_aivis_voice_cannot_silently_fall_back[missing_style]",
+      "seconds": 0.001,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_decay_uses_elapsed_time_not_tick_count",
+      "seconds": 0.013,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_state_changes_selection_via_recorded_contributions",
+      "seconds": 0.005,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_observation_is_not_admin_operation_and_habituation_changes",
+      "seconds": 0.005,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_unknown_components_and_unselected_actions_are_not_trained",
+      "seconds": 0.006,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_freeze_preserves_all_parameters",
+      "seconds": 0.006,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_imagined_results_rejected[llm]",
+      "seconds": 0.005,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_imagined_results_rejected[self_output]",
+      "seconds": 0.005,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_imagined_results_rejected[imagined]",
+      "seconds": 0.005,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_progress_requires_heldout_measurement",
+      "seconds": 0.005,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_correction_replaces_teacher_instead_of_double_counting",
+      "seconds": 0.006,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_hypotheses_do_not_resolve_questions_without_evidence",
+      "seconds": 0.031,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_stale_or_invalid_llm_results_not_applied",
+      "seconds": 0.004,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_intervening_observation_marks_recovery_attribution_uncertain",
+      "seconds": 0.007,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_self_output_is_separate_and_never_auto_evidence",
+      "seconds": 0.005,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_save_resume_preserves_rng_learning_models_and_identity",
+      "seconds": 0.013,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_crash_tail_recovery_and_strict_replay",
+      "seconds": 0.035,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_branch_ablations_preserve_parent_and_have_replay_boundary",
+      "seconds": 0.02,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_workspace_cut_removes_context_inputs",
+      "seconds": 0.013,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_language_context_is_bounded_without_losing_acoustic_record",
+      "seconds": 0.007,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_semantic_estimates_are_features_without_becoming_ground_truth",
+      "seconds": 0.006,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_observed_learning_changes_actual_selection_with_state_held_fixed",
+      "seconds": 0.19,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_snapshot_and_log_retention_keep_replayable_boundary",
+      "seconds": 0.03,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_status_reader_recovers_tail_without_writing_a_checkpoint",
+      "seconds": 0.006,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_devices_status.test_saved_devices_follow_identity_not_old_index_and_missing_does_not_fallback",
+      "seconds": 0.001,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_devices_status.test_native_stereo_microphone_is_resampled_and_has_meter_before_asr",
+      "seconds": 0.258,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_devices_status.test_recognition_busy_is_visible_before_a_slow_model_returns",
+      "seconds": 0.201,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_devices_status.test_removed_microphone_still_closes_and_allows_shutdown",
+      "seconds": 0.001,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_devices_status.test_output_uses_selected_device_native_format_and_cancellation",
+      "seconds": 0.002,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_devices_status.test_status_distinguishes_no_data_silence_voice_asr_and_disconnection[audio0-\\u97f3\\u58f0\\u30c7\\u30fc\\u30bf\\u3092\\u5f85\\u3063\\u3066\\u3044\\u307e\\u3059]",
+      "seconds": 0.001,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_devices_status.test_status_distinguishes_no_data_silence_voice_asr_and_disconnection[audio1-\\u307b\\u307c\\u7121\\u97f3]",
+      "seconds": 0.0,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_devices_status.test_status_distinguishes_no_data_silence_voice_asr_and_disconnection[audio2-\\u58f0\\u3089\\u3057\\u3044\\u97f3]",
+      "seconds": 0.0,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_devices_status.test_status_distinguishes_no_data_silence_voice_asr_and_disconnection[audio3-\\u8a00\\u8449\\u306b\\u5909\\u63db]",
+      "seconds": 0.0,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_devices_status.test_status_distinguishes_no_data_silence_voice_asr_and_disconnection[audio4-\\u9014\\u7d76\\u3048]",
+      "seconds": 0.0,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_devices_status.test_status_reports_model_failure_instead_of_calling_it_deliberate_silence",
+      "seconds": 0.0,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_devices_status.test_idle_choices_do_not_hide_last_input_decision",
+      "seconds": 0.009,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_devices_status.test_runtime_passes_output_choice_to_playback_without_training_on_test_audio",
+      "seconds": 0.006,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_devices_status.test_stopped_microphone_cannot_overwrite_new_capture_status",
+      "seconds": 0.004,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_experiments_audio.test_holdout_improves_and_frozen_condition_is_unchanged",
+      "seconds": 0.362,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_experiments_audio.test_evaluation_does_not_update_live_model_memory_or_state",
+      "seconds": 0.013,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_experiments_audio.test_resampling_pitch_and_missing_values",
+      "seconds": 0.008,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_experiments_audio.test_audio_callback_only_enqueues_and_overflow_is_bounded",
+      "seconds": 0.001,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_experiments_audio.test_recording_limit_is_enforced_before_loading_asr",
+      "seconds": 0.204,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_integration.test_real_tts_asr_streaming_vad_llm_and_speech_plan",
+      "seconds": 35.657,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_integration.test_real_autonomous_runtime_selects_and_generates_wave",
+      "seconds": 32.279,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_runtime_gui.test_idle_runtime_updates_and_saves_without_llm_calls",
+      "seconds": 0.167,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_runtime_gui.test_stale_worker_result_is_recorded_and_not_used",
+      "seconds": 0.008,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_runtime_gui.test_failed_inference_does_not_stop_clock_or_fabricate_speech",
+      "seconds": 0.131,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_runtime_gui.test_observation_window_renders_and_controls_learning",
+      "seconds": 0.282,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_runtime_gui.test_gui_routes_devices_starts_microphone_and_preserves_experiment_settings",
+      "seconds": 0.037,
+      "status": "passed"
+    }
+  ],
+  "integration_audio_source": "Real AivisSpeech / 凛音エル synthetic WAV; native 48 kHz stereo fixture feeds the microphone worker, streaming VAD, and actual faster-whisper. No physical microphone used.",
+  "tts": {
+    "engine": "AivisSpeech 1.2.0",
+    "model_uuid": "f5017410-fbb5-49e1-97cb-e785f42e15f5",
+    "model_name": "凛音エル",
+    "model_version": "1.0.0",
+    "style_name": "ノーマル"
+  },
+  "audio_device_checks": "Mock devices verify chosen input/output IDs, 48 kHz stereo-only formats, capture meter, pending recognition, removal/shutdown, old-capture status rejection, and missing/reindexed device identities.",
+  "gui_checks": "Actual Qt offscreen rendering; input/output choices, start with microphone, experimental configuration unchanged, progress/elapsed time/meter, small window with scrollable detail view.",
+  "previous_report": "test-results-v0.1.0.json",
+  "limitations": [
+    "Windows physical microphone/speaker and desktop interaction require target PC checks",
+    "CUDA/RTX 5060 untested",
+    "Target-PC latency and long-duration load unmeasured",
+    "Screenshot is explicitly labeled display fixture"
+  ]
+}

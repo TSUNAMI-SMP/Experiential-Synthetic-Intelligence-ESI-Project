@@ -1,47 +1,72 @@
 {
   "release": "ESI-01",
-  "package_version": "0.1.1",
-  "recorded_at_jst": "2026-10-13T08:16:37.460720+09:00",
+  "package_version": "0.2.0",
+  "recorded_at_jst": "2026-10-13T16:40:32.746689+09:00",
   "platform": "Linux-6.18.44-x86_64-with-glibc2.41",
   "python": "3.12.14 (main, Aug 25 2026, 14:00:49) [Clang 22.1.3 ]",
-  "command": "ESI_RUN_INTEGRATION=1 pytest -q --junitxml=/workspace/esi-environment/validation/esi-01-v0.1.1-final-tests.xml",
+  "command": "DISPLAY=:99 ESI_RUN_INTEGRATION=1 ESI_LIVE2D_MODEL=/workspace/esi-environment/live2d-validation/Haru/Haru.model3.json python -m pytest -q --junitxml=/workspace/esi-environment/validation/esi-01-v0.2.0-tests.xml",
   "exit_code": 0,
-  "tests": 53,
-  "passed": 53,
+  "tests": 63,
+  "passed": 63,
   "failed": 0,
   "errors": 0,
   "skipped": 0,
-  "integration_tests": 2,
-  "runner_seconds": 70.916,
-  "junit_sha256": "80a74960cb087724c91bd4f36c40d929bbebb0bdf9c958074bbf001e8e270166",
+  "integration_tests": 3,
+  "runner_seconds": 142.718,
+  "junit_sha256": "ae086df18b5d847f7f35b483cab5f74c213bd81dc1bd37cd3daae10b2a9d43d9",
   "source_hash_method": "SHA-256 of UTF-8 sorted relative-path + NUL + file SHA-256 + newline; docs/generated data excluded",
-  "source_sha256": "fcf4562f5572a3fe8b5c7703c53df3796abff79003be17a2cabb61d67c8ac023",
+  "source_sha256": "05500143720ea98706eda76df4e2435829698fa5dace3170641005e563073e3d",
   "source_files": {
+    "ESI-01を起動.cmd": "cf128d94d4bb463824f8b71c98b87789798dcc521b8ffcbb7769b9ae7eb505b2",
     "config/cloud.toml": "71faafffe667e989a3b9b741f1850eb59b02321e08b07f8b23f7238717b3e4ce",
     "config/windows.toml": "8a30ec7fe67296fb5d85600607937b467c08d620cef0c760cf51a7f6f0cc2bcd",
-    "pyproject.toml": "f4da9bb2d6ed7bd64414c441d4a0c2f531051398ed11c5ffe8b3004718cde191",
+    "pyproject.toml": "423661321b14e84dda4fb4b22c2346c42ed14301d65562810090045d91dc85a2",
+    "requirements-live2d.lock": "9e0c1d225280725f0f01734145f5fdcb96b6d8aab65580629ae3e08dd07357ef",
     "requirements.lock": "afbe8fd370f583fe8e455c735688ba1689499fbcb2c716e9551d33e6e3702c9e",
     "scripts/download-models.py": "197d0899d5da160fd14efb64ef51d3726cc2e50ded674c1abacee7ab2a45c42b",
-    "scripts/install-windows.ps1": "9ff2b312adc58bc67d87baadfee77708492fe255874cc96b71586e1458900ccb",
-    "src/esi/__init__.py": "4e6071cf50252c3e0ba63b39d33f6acd8a29593cc95c6d86ccbc0c897f9632e0",
+    "scripts/install-windows.ps1": "069a4e11fcc8fd31250dd67b52badfa0ea28bc42553cc607eeecaa9b5df98e65",
+    "scripts/start-windows.ps1": "f7b714c2b6bd93a53f7a91a9e2b7b827097d0653ed760534c4551b5962242cf2",
+    "src/esi/__init__.py": "7de8c073ddd5f51812969e9a1ab84fe2c727e5e3533a8bcbc16c59bb2c663c06",
     "src/esi/adapters.py": "b8fe0e169ca3ae895059b4d1e5b71f4d73e0115c1b31b8bed3306c889275eb18",
     "src/esi/audio.py": "73447ec4e76028ad4316bab81fef77f37eef6ea70cef91193c2e64507910abfd",
+    "src/esi/avatar.py": "66dd0e6f02c4d1eed78321011f46f6ef54a0f6050082c1d0565c5e3eaceeeb59",
     "src/esi/cli.py": "022e2a8f09b25616af64485baff583a6ed0bfe002913c7b795c886a32272f653",
-    "src/esi/core.py": "73bb76ceeca69816fc5afad2d29f44618dc0a76d9faf55b95164f806f044cfb3",
+    "src/esi/core.py": "883fcaecabbca59ced600c7e503ad2c3ca6617c453852262b3a812782a45c114",
+    "src/esi/desktop.py": "8348eb4940a1d4166efeec8e55116415f5c34ece39ac998a8b6db60512893c08",
+    "src/esi/desktop_preferences.py": "d43fdc31f628fc0cd01eba598e5c808632fafca62eb7323abc042a68444456a2",
     "src/esi/devices.py": "d8c11698d5ba95eb74d3ed9cb5e273b1513056938710444488c44c8abc9b646f",
     "src/esi/experiments.py": "ae62434bfc95a6394f0d653b46119a5a8ddbb3df5e3a3737264b718f46cf19ec",
-    "src/esi/gui.py": "7529aec1c30ec6d437aea5576d6263959fb4e74eac47391614c29d7e819c5b49",
+    "src/esi/gui.py": "012bf4c9250eefbcf57c6bbbc00754bed24d4abcf1948fe65ea5eb47f51331ec",
+    "src/esi/icons.py": "ed2d91da0137ea0bf5694f235cbb7addb1f6eaace33537e7860bdfc846031d6e",
     "src/esi/learning.py": "984f547e77cb2a8e3e7404d1ace5364851451e529dab3c1040fd6b8639894d66",
+    "src/esi/model_probe.py": "6857dc86237bc3e90f0d3e04ca33261dc670614cd71e84834b73c8e521f67cdd",
     "src/esi/models.py": "d6ea8d019f6d63c1c94c280d8e5e4f80bad27fe532aa3f7ec2bafea0b1f130f5",
     "src/esi/presentation.py": "74ba3cfb372a2abf4f3f98232b75cb8e336a9c253e7ffd36056dcb5c33c5627b",
+    "src/esi/resources/icons/avatar.svg": "1621f9e0944a0ac9286c3a85e58cfde3d4d64441d42f90248b539149e6dbc6f7",
+    "src/esi/resources/icons/ear.svg": "60caf83dda91265dc6ea85d09e40fe254a946e25d2d620b7adfa6c1401b4bc7e",
+    "src/esi/resources/icons/error.svg": "2e05d48c9f53475e095011be512764a3c7af73968267356bfa46277df8fb19cf",
+    "src/esi/resources/icons/folder.svg": "ca2ba12530164ff5d495f0a2c5292bba7c592e12e67632ab0c68e9dda1a66da1",
+    "src/esi/resources/icons/microphone.svg": "1ed23215a3589e966764f23ed8f6f02de491e8ca14c1b875394c945018280b6a",
+    "src/esi/resources/icons/reprocess.svg": "79802de3466fa9752ef0ebf87364ffcc3812a207e397fd84b8e193098483e980",
+    "src/esi/resources/icons/rest.svg": "e20ec983051c4f01907ffd9b8c1cd4859b13eba1b5de0d2370d60842d72efc85",
+    "src/esi/resources/icons/save.svg": "4ff73e2ebc2bdefe18c2ce0847db1c5290333272a27d8b4d8d084b7d695a97e9",
+    "src/esi/resources/icons/speak.svg": "191a05e739724f638864f419ad41c96c047f03739fa76c1b5a9adc0ac56dcc94",
+    "src/esi/resources/icons/start.svg": "4b9b3201a9835d278f0aca8971551c93f102dd000c4177e9c9397f9e6cd3d059",
+    "src/esi/resources/icons/stop.svg": "809f43156a5551aa27e3e76acf55bb60f8a20a1f2a4908cab06764f1054a313c",
+    "src/esi/resources/icons/think.svg": "69c1e9aa93ef6f15bed097739b2db2cd3f402f4643e4346f133e797b0b2de33a",
+    "src/esi/resources/icons/wait.svg": "5ba36ce4b957ea4119adc78615c9c4e7a13444707ab13c909f6ae144031cbb80",
+    "src/esi/resources/rion-el.png": "d163ec402cea37c6f3224e33959e1da5ed600ded6dae958ed07bd8ac51d7f9de",
     "src/esi/runtime.py": "5b486285158d073bf72b5559bddbe92a96ea5243a13b3aca2aca7d006c700f0a",
     "src/esi/storage.py": "af724b00a4d00155d9e25e532e7f845e1199ea386586f107c8fdd7a3b0712042",
     "tests/test_aivis.py": "bd5e680967f7872f8cdd426441c9bed484d3565483e2576cc128722fe6e9e3e4",
     "tests/test_core.py": "55d976087499d41f4a8e62342baab95e9890dd85f60747b0d2f897beb8af6ff9",
+    "tests/test_desktop.py": "15f887f81fcb732a45c931b8881fdb10d22ec614af4c67411b3b5ae3345782c0",
     "tests/test_devices_status.py": "76eb64cd4756196c646f8476a292164e3b6ab57d5777ce6022fcbe59cc916d48",
     "tests/test_experiments_audio.py": "11a016f7df28beab01c8406478c49d9d4ab0625f02d2fcad2e3b31588bafeccd",
     "tests/test_integration.py": "8985f1559e0e58ac485d31be7096e28b08eed61c42288f0ec473d3435aae9a56",
-    "tests/test_runtime_gui.py": "89b00beaf40fb0312b35f58777ceb00435d071352283a44938a59c9c89d012c3"
+    "tests/test_live2d_integration.py": "2e3196aef3dd50f2ae42328ef58422288a74dfd5b4bf8b2fef8942e8ecbacc69",
+    "tests/test_runtime_gui.py": "89b00beaf40fb0312b35f58777ceb00435d071352283a44938a59c9c89d012c3",
+    "初回準備・更新.cmd": "ae5c8e25fa14126c3e63b007532c704b06e7f0722f232995f5eb6b0dfa986cec"
   },
   "cases": [
     {
@@ -66,7 +91,7 @@
     },
     {
       "name": "tests.test_core.test_decay_uses_elapsed_time_not_tick_count",
-      "seconds": 0.013,
+      "seconds": 0.018,
       "status": "passed"
     },
     {
@@ -81,22 +106,22 @@
     },
     {
       "name": "tests.test_core.test_unknown_components_and_unselected_actions_are_not_trained",
-      "seconds": 0.006,
+      "seconds": 0.009,
       "status": "passed"
     },
     {
       "name": "tests.test_core.test_freeze_preserves_all_parameters",
-      "seconds": 0.006,
+      "seconds": 0.008,
       "status": "passed"
     },
     {
       "name": "tests.test_core.test_imagined_results_rejected[llm]",
-      "seconds": 0.005,
+      "seconds": 0.006,
       "status": "passed"
     },
     {
       "name": "tests.test_core.test_imagined_results_rejected[self_output]",
-      "seconds": 0.005,
+      "seconds": 0.006,
       "status": "passed"
     },
     {
@@ -116,47 +141,47 @@
     },
     {
       "name": "tests.test_core.test_hypotheses_do_not_resolve_questions_without_evidence",
-      "seconds": 0.031,
+      "seconds": 0.006,
       "status": "passed"
     },
     {
       "name": "tests.test_core.test_stale_or_invalid_llm_results_not_applied",
-      "seconds": 0.004,
-      "status": "passed"
-    },
-    {
-      "name": "tests.test_core.test_intervening_observation_marks_recovery_attribution_uncertain",
-      "seconds": 0.007,
-      "status": "passed"
-    },
-    {
-      "name": "tests.test_core.test_self_output_is_separate_and_never_auto_evidence",
       "seconds": 0.005,
       "status": "passed"
     },
     {
+      "name": "tests.test_core.test_intervening_observation_marks_recovery_attribution_uncertain",
+      "seconds": 0.009,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_core.test_self_output_is_separate_and_never_auto_evidence",
+      "seconds": 0.008,
+      "status": "passed"
+    },
+    {
       "name": "tests.test_core.test_save_resume_preserves_rng_learning_models_and_identity",
-      "seconds": 0.013,
+      "seconds": 0.017,
       "status": "passed"
     },
     {
       "name": "tests.test_core.test_crash_tail_recovery_and_strict_replay",
-      "seconds": 0.035,
+      "seconds": 0.047,
       "status": "passed"
     },
     {
       "name": "tests.test_core.test_branch_ablations_preserve_parent_and_have_replay_boundary",
-      "seconds": 0.02,
+      "seconds": 0.024,
       "status": "passed"
     },
     {
       "name": "tests.test_core.test_workspace_cut_removes_context_inputs",
-      "seconds": 0.013,
+      "seconds": 0.014,
       "status": "passed"
     },
     {
       "name": "tests.test_core.test_language_context_is_bounded_without_losing_acoustic_record",
-      "seconds": 0.007,
+      "seconds": 0.009,
       "status": "passed"
     },
     {
@@ -166,17 +191,62 @@
     },
     {
       "name": "tests.test_core.test_observed_learning_changes_actual_selection_with_state_held_fixed",
-      "seconds": 0.19,
+      "seconds": 0.241,
       "status": "passed"
     },
     {
       "name": "tests.test_core.test_snapshot_and_log_retention_keep_replayable_boundary",
-      "seconds": 0.03,
+      "seconds": 0.037,
       "status": "passed"
     },
     {
       "name": "tests.test_core.test_status_reader_recovers_tail_without_writing_a_checkpoint",
-      "seconds": 0.006,
+      "seconds": 0.008,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_desktop.test_topmost_controls_work_while_main_minimized_and_do_not_change_learning",
+      "seconds": 0.309,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_desktop.test_open_save_stops_and_checkpoints_old_session_restores_stored_settings",
+      "seconds": 0.15,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_desktop.test_invalid_save_cannot_stop_or_replace_current_session",
+      "seconds": 0.026,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_desktop.test_missing_exported_assets_rejected_before_replacing_avatar",
+      "seconds": 0.003,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_desktop.test_launcher_reuses_healthy_engines_without_starting_or_killing_them",
+      "seconds": 0.003,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_desktop.test_launcher_starts_correct_llama_and_only_stops_its_own_process",
+      "seconds": 0.001,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_desktop.test_opening_saved_settings_preserves_config_and_does_not_create_missing_save",
+      "seconds": 0.009,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_desktop.test_healthy_server_with_other_language_model_is_rejected",
+      "seconds": 0.001,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_desktop.test_native_probe_failure_preserves_current_avatar",
+      "seconds": 0.004,
       "status": "passed"
     },
     {
@@ -186,12 +256,12 @@
     },
     {
       "name": "tests.test_devices_status.test_native_stereo_microphone_is_resampled_and_has_meter_before_asr",
-      "seconds": 0.258,
+      "seconds": 0.203,
       "status": "passed"
     },
     {
       "name": "tests.test_devices_status.test_recognition_busy_is_visible_before_a_slow_model_returns",
-      "seconds": 0.201,
+      "seconds": 0.206,
       "status": "passed"
     },
     {
@@ -201,32 +271,32 @@
     },
     {
       "name": "tests.test_devices_status.test_output_uses_selected_device_native_format_and_cancellation",
-      "seconds": 0.002,
+      "seconds": 0.003,
       "status": "passed"
     },
     {
       "name": "tests.test_devices_status.test_status_distinguishes_no_data_silence_voice_asr_and_disconnection[audio0-\\u97f3\\u58f0\\u30c7\\u30fc\\u30bf\\u3092\\u5f85\\u3063\\u3066\\u3044\\u307e\\u3059]",
-      "seconds": 0.001,
+      "seconds": 0.0,
       "status": "passed"
     },
     {
       "name": "tests.test_devices_status.test_status_distinguishes_no_data_silence_voice_asr_and_disconnection[audio1-\\u307b\\u307c\\u7121\\u97f3]",
-      "seconds": 0.0,
+      "seconds": 0.001,
       "status": "passed"
     },
     {
       "name": "tests.test_devices_status.test_status_distinguishes_no_data_silence_voice_asr_and_disconnection[audio2-\\u58f0\\u3089\\u3057\\u3044\\u97f3]",
-      "seconds": 0.0,
+      "seconds": 0.001,
       "status": "passed"
     },
     {
       "name": "tests.test_devices_status.test_status_distinguishes_no_data_silence_voice_asr_and_disconnection[audio3-\\u8a00\\u8449\\u306b\\u5909\\u63db]",
-      "seconds": 0.0,
+      "seconds": 0.001,
       "status": "passed"
     },
     {
       "name": "tests.test_devices_status.test_status_distinguishes_no_data_silence_voice_asr_and_disconnection[audio4-\\u9014\\u7d76\\u3048]",
-      "seconds": 0.0,
+      "seconds": 0.001,
       "status": "passed"
     },
     {
@@ -236,12 +306,12 @@
     },
     {
       "name": "tests.test_devices_status.test_idle_choices_do_not_hide_last_input_decision",
-      "seconds": 0.009,
+      "seconds": 0.012,
       "status": "passed"
     },
     {
       "name": "tests.test_devices_status.test_runtime_passes_output_choice_to_playback_without_training_on_test_audio",
-      "seconds": 0.006,
+      "seconds": 0.007,
       "status": "passed"
     },
     {
@@ -251,47 +321,52 @@
     },
     {
       "name": "tests.test_experiments_audio.test_holdout_improves_and_frozen_condition_is_unchanged",
-      "seconds": 0.362,
+      "seconds": 0.459,
       "status": "passed"
     },
     {
       "name": "tests.test_experiments_audio.test_evaluation_does_not_update_live_model_memory_or_state",
-      "seconds": 0.013,
+      "seconds": 0.016,
       "status": "passed"
     },
     {
       "name": "tests.test_experiments_audio.test_resampling_pitch_and_missing_values",
-      "seconds": 0.008,
+      "seconds": 0.009,
       "status": "passed"
     },
     {
       "name": "tests.test_experiments_audio.test_audio_callback_only_enqueues_and_overflow_is_bounded",
-      "seconds": 0.001,
+      "seconds": 0.002,
       "status": "passed"
     },
     {
       "name": "tests.test_experiments_audio.test_recording_limit_is_enforced_before_loading_asr",
-      "seconds": 0.204,
+      "seconds": 0.289,
       "status": "passed"
     },
     {
       "name": "tests.test_integration.test_real_tts_asr_streaming_vad_llm_and_speech_plan",
-      "seconds": 35.657,
+      "seconds": 69.216,
       "status": "passed"
     },
     {
       "name": "tests.test_integration.test_real_autonomous_runtime_selects_and_generates_wave",
-      "seconds": 32.279,
+      "seconds": 62.748,
+      "status": "passed"
+    },
+    {
+      "name": "tests.test_live2d_integration.test_real_cubism_render_animation_reload_and_clean_shutdown",
+      "seconds": 6.912,
       "status": "passed"
     },
     {
       "name": "tests.test_runtime_gui.test_idle_runtime_updates_and_saves_without_llm_calls",
-      "seconds": 0.167,
+      "seconds": 0.194,
       "status": "passed"
     },
     {
       "name": "tests.test_runtime_gui.test_stale_worker_result_is_recorded_and_not_used",
-      "seconds": 0.008,
+      "seconds": 0.013,
       "status": "passed"
     },
     {
@@ -301,12 +376,12 @@
     },
     {
       "name": "tests.test_runtime_gui.test_observation_window_renders_and_controls_learning",
-      "seconds": 0.282,
+      "seconds": 0.095,
       "status": "passed"
     },
     {
       "name": "tests.test_runtime_gui.test_gui_routes_devices_starts_microphone_and_preserves_experiment_settings",
-      "seconds": 0.037,
+      "seconds": 0.072,
       "status": "passed"
     }
   ],
@@ -320,11 +395,35 @@
   },
   "audio_device_checks": "Mock devices verify chosen input/output IDs, 48 kHz stereo-only formats, capture meter, pending recognition, removal/shutdown, old-capture status rejection, and missing/reindexed device identities.",
   "gui_checks": "Actual Qt offscreen rendering; input/output choices, start with microphone, experimental configuration unchanged, progress/elapsed time/meter, small window with scrollable detail view.",
-  "previous_report": "test-results-v0.1.0.json",
+  "previous_report": "test-results-v0.1.1.json",
   "limitations": [
-    "Windows physical microphone/speaker and desktop interaction require target PC checks",
-    "CUDA/RTX 5060 untested",
-    "Target-PC latency and long-duration load unmeasured",
-    "Screenshot is explicitly labeled display fixture"
-  ]
+    "Windows hardware, actual speakers/microphone, GPU/CUDA, desktop compositing/stacking on Windows and PowerShell execution not tested",
+    "Rion El full Cubism model not authored/exported; proprietary Windows/macOS Cubism Editor unavailable in this Linux environment",
+    "Speech mouth indicator follows playback stage with a procedural opening; not amplitude/phoneme synchronization",
+    "Double-click Windows CMD launcher supplied; no standalone Windows executable built",
+    "Official Haru model retained only in test environment, not redistributed"
+  ],
+  "desktop_checks": [
+    "Topmost avatar controls while main minimized; microphone start/stop; geometry persistence independent of learning",
+    "Save selection preserves stored configuration and identity; previous session checkpointed and closed; invalid selection preserves current session",
+    "Launcher reuses healthy services, verifies model identity, starts correct llama command and terminates only owned process",
+    "Actual local service preparation and main-window launch checked on Linux; Windows wheel downloads hash-verified",
+    "Built wheel includes avatar PNG and 13 SVG icons"
+  ],
+  "live2d_checks": {
+    "library": "live2d-py 1.0.0",
+    "sdk_reported": "6.0.1",
+    "model": "official Haru (not Rion El)",
+    "parameters": 42,
+    "frame_hashes": [
+      "364ff75b597149a2d150de279cf2800aca799ae22800559ca329a140448398a8",
+      "df514e4852c568d4b64d82029b2a094a9ef18efe177d9db1a4b7cf17404edfdf",
+      "bab4061eed159a58d134c0a477a0ff93fb57bc935423cf610856d9203de0f57a"
+    ],
+    "reload": true,
+    "official_sample_source": "https://github.com/Live2D/CubismNativeSamples/tree/a3a64f6cb327aafce380949e0f54fe51c4d773d9/Samples/Resources/Haru",
+    "rendering": "Qt xcb / Xvfb / software OpenGL on Linux; actual MOC3 geometry and textures",
+    "rion_el_model_complete": false,
+    "artwork": "Transparent still PNG and generated parts-sheet draft; no rigged PSD/CMO3/MOC3"
+  }
 }

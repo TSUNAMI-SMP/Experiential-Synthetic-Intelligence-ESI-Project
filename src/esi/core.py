@@ -39,6 +39,13 @@ class Core:
     def __init__(self, database: str | Path, settings: Settings | None = None, read_only=False):
         self.lock = threading.RLock()
         self.store = Store(database, read_only=read_only)
+        try:
+            self._initialize(settings, read_only)
+        except Exception:
+            self.store.close()
+            raise
+
+    def _initialize(self, settings, read_only):
         saved = self.store.load_snapshot()
         stored_settings = self.store.meta("settings")
         self.settings = settings or Settings.model_validate(stored_settings or {})
@@ -46,7 +53,6 @@ class Core:
             stored_settings
             and Settings.model_validate(stored_settings).fingerprint != self.settings.fingerprint
         ):
-            self.store.close()
             raise ValueError(
                 "Configuration differs from saved experiment. Create a branch before changing it."
             )
@@ -81,7 +87,6 @@ class Core:
                 self.execute(record["payload"], record=False)
         else:
             if read_only:
-                self.store.close()
                 raise ValueError("No saved state in this database")
             self.store.set_meta("settings", self.settings.model_dump())
             self.checkpoint(initial=True)

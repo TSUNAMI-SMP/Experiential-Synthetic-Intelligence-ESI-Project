@@ -2,6 +2,7 @@ import json
 import math
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from PySide6.QtCore import QPointF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPen
@@ -10,6 +11,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -27,9 +29,12 @@ from PySide6.QtWidgets import (
 )
 
 from esi.adapters import test_tone
+from esi.avatar import AvatarWindow
 from esi.core import Core
+from esi.desktop_preferences import read_preferences, write_preferences
 from esi.devices import audio_devices, identity, load_preferences, resolve_device, save_preferences
 from esi.experiments import compare
+from esi.icons import activity_symbol, icon
 from esi.models import Observation, Outcome, uid
 from esi.presentation import ACTION_LABELS, SOURCE_LABELS, describe
 from esi.runtime import Runtime
@@ -88,7 +93,7 @@ def fill(widget, rows):
 
 
 class Window(QMainWindow):
-    def __init__(self, core: Core):
+    def __init__(self, core: Core, preferences_directory=None):
         super().__init__()
         self.core = core
         self.runtime = None
@@ -98,7 +103,21 @@ class Window(QMainWindow):
         self.audio_test_pool = ThreadPoolExecutor(max_workers=1)
         self.audio_test = None
         self.audio_test_stop = threading.Event()
-        self.preferences_path = core.store.path.parent / "audio-devices.json"
+        preferences_directory = Path(preferences_directory or core.store.path.parent)
+        self.preferences_path = preferences_directory / "audio-devices.json"
+        self.desktop_path = preferences_directory / "desktop.json"
+        try:
+            self.desktop_preferences = read_preferences(self.desktop_path)
+        except (OSError, ValueError):
+            self.desktop_preferences = {}
+        if not isinstance(self.desktop_preferences.get("avatar"), dict):
+            self.desktop_preferences["avatar"] = {}
+        self.avatar = AvatarWindow(self.desktop_preferences.setdefault("avatar", {}))
+        self.avatar.start_requested.connect(self.toggle)
+        self.avatar.microphone_requested.connect(lambda: self.submit("microphone"))
+        self.avatar.main_requested.connect(self.show_main)
+        self.avatar.hidden_requested.connect(lambda: self.avatar_enabled.setChecked(False))
+        self.avatar.preferences_changed.connect(self.save_desktop_preferences)
         try:
             self.preferences = load_preferences(self.preferences_path)
             self.device_error = ""
@@ -120,16 +139,21 @@ class Window(QMainWindow):
         layout.addWidget(self.heading)
         controls = QHBoxLayout()
         self.start_button = QPushButton("開始")
+        self.start_button.setIcon(icon("start"))
         self.start_button.clicked.connect(self.toggle)
         controls.addWidget(self.start_button)
         for label, callback in [
             ("保存", lambda: self.submit("save")),
+            ("セーブを開く", self.load_save),
             ("録音ファイル入力", self.recording),
         ]:
             button = QPushButton(label)
             button.clicked.connect(callback)
+            if label != "録音ファイル入力":
+                button.setIcon(icon("save" if label == "保存" else "folder"))
             controls.addWidget(button)
         self.microphone_button = QPushButton("マイクを使う")
+        self.microphone_button.setIcon(icon("microphone"))
         self.microphone_button.clicked.connect(lambda: self.submit("microphone"))
         self.microphone_button.setEnabled(False)
         controls.addWidget(self.microphone_button)
@@ -138,6 +162,21 @@ class Window(QMainWindow):
         controls.addWidget(self.microphone_on_start)
         controls.addStretch()
         layout.addLayout(controls)
+        desktop_controls = QHBoxLayout()
+        self.save_label = QLabel()
+        self.save_label.setWordWrap(True)
+        desktop_controls.addWidget(self.save_label, 1)
+        self.avatar_enabled = QCheckBox("最前面にアバターを表示")
+        self.avatar_enabled.toggled.connect(self.toggle_avatar)
+        desktop_controls.addWidget(self.avatar_enabled)
+        self.model_button = QPushButton("Live2Dモデルを選ぶ")
+        self.model_button.setIcon(icon("avatar"))
+        self.model_button.clicked.connect(self.select_avatar_model)
+        desktop_controls.addWidget(self.model_button)
+        self.still_button = QPushButton("立ち絵に戻す")
+        self.still_button.clicked.connect(self.reset_avatar_model)
+        desktop_controls.addWidget(self.still_button)
+        layout.addLayout(desktop_controls)
         routing = QHBoxLayout()
         routing.addWidget(QLabel("入力マイク"))
         self.input_devices = QComboBox()
@@ -169,12 +208,37 @@ class Window(QMainWindow):
         tabs.addTab(self.research_scroll, "詳しい観察")
         layout.addWidget(tabs, 1)
         basic_layout = QVBoxLayout(basic)
+        phase_row = QHBoxLayout()
+        self.phase_icon = QLabel()
+        self.phase_icon.setFixedSize(76, 76)
+        phase_row.addWidget(self.phase_icon)
+        phase_text = QVBoxLayout()
         self.phase_title = QLabel()
         self.phase_title.setWordWrap(True)
-        basic_layout.addWidget(self.phase_title)
+        phase_text.addWidget(self.phase_title)
         self.phase_detail = QLabel()
         self.phase_detail.setWordWrap(True)
-        basic_layout.addWidget(self.phase_detail)
+        phase_text.addWidget(self.phase_detail)
+        phase_row.addLayout(phase_text, 1)
+        basic_layout.addLayout(phase_row)
+        stages = QHBoxLayout()
+        self.stage_cards = []
+        for name, label in [
+            ("microphone", "① 入力"),
+            ("ear", "② 聞き取り"),
+            ("think", "③ 検討"),
+            ("speak", "④ 発声"),
+        ]:
+            card = QFrame()
+            card.setObjectName("stageCard")
+            row = QHBoxLayout(card)
+            picture = QLabel()
+            picture.setPixmap(icon(name).pixmap(30, 30))
+            row.addWidget(picture)
+            row.addWidget(QLabel(label), 1)
+            stages.addWidget(card, 1)
+            self.stage_cards.append(card)
+        basic_layout.addLayout(stages)
         self.phase_steps = QLabel("①マイク → ②聞き取り → ③検討 → ④発声")
         self.phase_steps.setWordWrap(True)
         basic_layout.addWidget(self.phase_steps)
@@ -270,13 +334,103 @@ class Window(QMainWindow):
         layout.addWidget(self.diagnostics)
         self.statusBar().showMessage("停止中。開始を押すと状態更新・選択が続きます。")
         self.setStyleSheet(
-            "QMainWindow, QWidget {background: #172633; color: #e7edf5;} QPushButton {padding: 8px; background: #294357;} QLineEdit, QTextEdit, QTableWidget {background: #12212e;} QHeaderView::section {background: #294357; padding: 5px;}"
+            "QMainWindow, QWidget {background: #152332; color: #e7edf5; font-size: 12px;}"
+            "QPushButton {padding: 8px 10px; background: #294357; border: 1px solid #39566f; border-radius: 6px;}"
+            "QPushButton:hover {background: #355770;} QPushButton:disabled {color: #8194a7; background: #203244;}"
+            "QLineEdit, QTextEdit, QTableWidget {background: #101d2b; border: 1px solid #30465b; border-radius: 6px; padding: 5px;}"
+            "QComboBox {padding: 5px; background: #203649; border: 1px solid #39566f; border-radius: 5px;}"
+            "QHeaderView::section {background: #294357; padding: 5px;}"
+            "QTabBar::tab {padding: 8px 16px; background: #203244;} QTabBar::tab:selected {background: #355770;}"
+            "QProgressBar {border: 1px solid #39566f; border-radius: 4px; text-align: center; min-height: 16px;}"
+            "QProgressBar::chunk {background: #4fae9e; border-radius: 3px;}"
         )
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
         self.timer.start(300)
         self.refresh_devices()
         self.refresh()
+        saved_model = self.desktop_preferences["avatar"].get("model")
+        if saved_model:
+            try:
+                self.avatar.set_model(saved_model)
+            except (OSError, ValueError, KeyError, TypeError, ImportError) as exc:
+                self.statusBar().showMessage(f"Live2Dを読み込めません。立ち絵で開きました：{exc}")
+
+    def save_desktop_preferences(self):
+        self.desktop_preferences["save_path"] = str(self.core.store.path.resolve())
+        try:
+            write_preferences(self.desktop_path, self.desktop_preferences)
+        except OSError as exc:
+            self.statusBar().showMessage(f"画面設定を保存できません：{exc}")
+
+    def toggle_avatar(self, enabled):
+        if enabled:
+            self.avatar.show()
+            self.avatar.raise_()
+        else:
+            self.avatar.hide()
+
+    def show_main(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def select_avatar_model(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "書き出し済みLive2Dモデルを選ぶ", "", "Live2D (*.model3.json)"
+        )
+        if path:
+            try:
+                self.avatar.set_model(path)
+                self.desktop_preferences["avatar"]["model"] = path
+                self.save_desktop_preferences()
+                self.avatar_enabled.setChecked(True)
+            except (OSError, ValueError, KeyError, TypeError, ImportError) as exc:
+                self.statusBar().showMessage(f"Live2Dを読み込めません：{exc}")
+
+    def reset_avatar_model(self):
+        self.avatar.set_model(None)
+        self.desktop_preferences["avatar"].pop("model", None)
+        self.save_desktop_preferences()
+
+    def load_save(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "以前のセーブを開く", str(self.core.store.path.parent), "ESIのセーブ (*.sqlite3)"
+        )
+        if path:
+            try:
+                self.switch_save(path)
+            except Exception as exc:
+                self.statusBar().showMessage(f"セーブを開けません。現在のセーブは保持しています：{exc}")
+
+    def switch_save(self, path):
+        path = Path(path).resolve(strict=True)
+        if path == self.core.store.path.resolve():
+            self.statusBar().showMessage("このセーブはすでに開いています。")
+            return
+        if self.audio_test:
+            raise RuntimeError("音のテストが終わってからセーブを開いてください。")
+        # Validate without writing to the selected file before stopping the current session.
+        probe = Core(path, read_only=True)
+        probe.close()
+        if self.runtime:
+            self.toggle()
+        replacement = Core(path)
+        previous = self.core
+        self.core = replacement
+        previous.close()
+        self.history.clear()
+        self.learning_box.blockSignals(True)
+        self.learning_box.setChecked(replacement.learning_enabled)
+        self.learning_box.blockSignals(False)
+        self.transcript.clear()
+        self.audio_plot.update_values([])
+        self.last_output.setText("音声出力：未実行")
+        self.candidate_table.setRowCount(0)
+        self.action_ids.clear()
+        self.save_desktop_preferences()
+        self.refresh()
+        self.statusBar().showMessage("セーブを開きました。続けるには「開始」を押してください。")
 
     def refresh_devices(self):
         if self.runtime:
@@ -375,6 +529,7 @@ class Window(QMainWindow):
             self.runtime.stop()
             self.runtime = None
             self.start_button.setText("開始")
+            self.start_button.setIcon(icon("start"))
             self._enable_devices(True)
             self.microphone_button.setEnabled(False)
             self.statusBar().showMessage("停止中。機器を選び直してから再開できます。")
@@ -384,6 +539,7 @@ class Window(QMainWindow):
                 self.runtime = Runtime(self.core, input_id, output_id)
                 self.runtime.start(microphone=self.microphone_on_start.isChecked())
                 self.start_button.setText("停止")
+                self.start_button.setIcon(icon("stop"))
                 self._enable_devices(False)
                 self.microphone_button.setEnabled(True)
                 self.statusBar().showMessage("処理中。入力音量と「いまの動作」で進行を確認できます。")
@@ -457,6 +613,8 @@ class Window(QMainWindow):
 
     def refresh(self):
         view = self.core.view()
+        self.save_label.setText(f"開いているセーブ：{self.core.store.path.name}")
+        self.save_label.setToolTip(str(self.core.store.path.resolve()))
         self.refresh_basic(view)
         self.identity.setText(
             f"agent {view['agent_id'][:12]}  /  branch {view['branch_id'][:12]}  /  活動 {view['elapsed']:.1f} 秒  /  学習 {'有効' if view['learning'] else '停止'}"
@@ -546,6 +704,20 @@ class Window(QMainWindow):
 
     def refresh_basic(self, view):
         current = describe(view, bool(self.runtime))
+        self.phase_icon.setPixmap(icon(activity_symbol(view, current["phase"])).pixmap(68, 68))
+        active_stage = {
+            "listening": 0,
+            "recognizing": 1,
+            "interpreting": 2,
+            "generating": 2,
+            "synthesizing": 3,
+            "playing": 3,
+        }.get(current["phase"])
+        for index, card in enumerate(self.stage_cards):
+            card.setStyleSheet(
+                "QFrame#stageCard {background: %s; border: 1px solid %s; border-radius: 8px;}"
+                % (("#244c51", "#63d6c2") if index == active_stage else ("#1c3043", "#30465b"))
+            )
         self.phase_title.setText(current["title"])
         self.phase_title.setStyleSheet(
             f"font-size: 22px; font-weight: bold; color: {'#ee7f9e' if current['error'] else '#63d6c2'}"
@@ -556,6 +728,7 @@ class Window(QMainWindow):
         level = round(max(0, min(100, (20 * math.log10(max(rms, 1e-6)) + 60) / 60 * 100)))
         self.input_meter.setValue(level)
         mic = bool(self.runtime and self.runtime.microphone)
+        self.avatar.set_status(view, current, bool(self.runtime), mic, enabled=not bool(self.audio_test))
         self.microphone_button.setText("マイクを止める" if mic else "マイクを使う")
         count = audio.get("recognized_intervals", 0)
         voice = "検出中" if audio.get("speaking") and mic else "待機"
@@ -610,6 +783,7 @@ class Window(QMainWindow):
 
     def closeEvent(self, event):
         self.timer.stop()
+        self.avatar.shutdown()
         if self.runtime:
             self.runtime.stop()
         self.study_pool.shutdown(wait=False, cancel_futures=True)
