@@ -73,9 +73,23 @@ class Perception:
         self.lock = threading.Lock()
         self.baseline = None
 
-    def recognize(self, audio, source=Source.RECORDING, metadata=None, mono_start=None, wall_start=None):
+    def _create_model(self):
         from faster_whisper import WhisperModel
 
+        return WhisperModel(
+            self.settings.asr_model_path,
+            device="cpu",
+            compute_type="int8",
+            cpu_threads=self.settings.cpu_threads,
+            num_workers=1,
+            local_files_only=True,
+        )
+
+    def _transcribe(self, audio):
+        segments, info = self.model.transcribe(audio, language="ja", beam_size=1, vad_filter=False)
+        return list(segments), info
+
+    def recognize(self, audio, source=Source.RECORDING, metadata=None, mono_start=None, wall_start=None):
         audio = np.asarray(audio, dtype=np.float32)
         if len(audio) == 0:
             raise ValueError("Empty speech segment")
@@ -90,16 +104,8 @@ class Perception:
                     )
                 with Path(self.settings.asr_model_path, "model.bin").open("rb") as source_file:
                     self.model_sha256 = hashlib.file_digest(source_file, "sha256").hexdigest()
-                self.model = WhisperModel(
-                    self.settings.asr_model_path,
-                    device="cpu",
-                    compute_type="int8",
-                    cpu_threads=self.settings.cpu_threads,
-                    num_workers=1,
-                    local_files_only=True,
-                )
-            segments, info = self.model.transcribe(audio, language="ja", beam_size=1, vad_filter=False)
-            segments = list(segments)
+                self.model = self._create_model()
+            segments, info = self._transcribe(audio)
             rms = float(np.sqrt(np.mean(audio * audio)))
             baseline = self.baseline
             self.baseline = rms if baseline is None else 0.9 * baseline + 0.1 * rms

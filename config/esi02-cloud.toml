@@ -1,0 +1,7 @@
+release = "ESI-02"
+llm_device = "cpu"
+asr_device = "cpu"
+asr_model_path = "models/faster-whisper-small"
+playback = false
+reply_tokens = 256
+cpu_threads = 2
