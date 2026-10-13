@@ -192,7 +192,8 @@ def test_missing_exported_assets_rejected_before_replacing_avatar(app, tmp_path)
         avatar.deleteLater()
 
 
-def test_launcher_reuses_healthy_engines_without_starting_or_killing_them(tmp_path, monkeypatch):
+@pytest.mark.parametrize("engine_version", ["1.1.0", "1.2.0"])
+def test_launcher_reuses_healthy_engines_without_starting_or_killing_them(tmp_path, monkeypatch, engine_version):
     settings = Settings()
     original_client = httpx.Client
     calls = []
@@ -204,7 +205,7 @@ def test_launcher_reuses_healthy_engines_without_starting_or_killing_them(tmp_pa
         if request.url.path == "/v1/models":
             return httpx.Response(200, json={"data": [{"id": "Qwen3-4B-Q4_K_M.gguf"}]})
         if request.url.path == "/version":
-            return httpx.Response(200, json="1.2.0")
+            return httpx.Response(200, json=engine_version)
         if request.url.path.startswith("/aivm_models/"):
             return httpx.Response(
                 200,

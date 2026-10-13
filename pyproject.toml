@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "esi"
-version = "0.2.0"
+version = "0.2.1"
 description = "ESI-01: Experiential Synthetic Intelligence research runtime"
 requires-python = ">=3.12,<3.13"
 dependencies = [

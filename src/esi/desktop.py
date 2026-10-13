@@ -145,8 +145,10 @@ class Services:
         with httpx.Client(base_url=settings.aivis_url, trust_env=False, timeout=30) as client:
             version = client.get("/version")
             version.raise_for_status()
-            if version.json() != "1.2.0":
-                raise ValueError("AivisSpeech Engine 1.2.0 が必要です。")
+            reported_version = version.json()
+            if not isinstance(reported_version, str) or not reported_version.strip():
+                raise ValueError("AivisSpeech Engineの応答を確認できません。")
+            self.notify(f"AivisSpeech Engine {reported_version} に接続しました。凛音エルを確認します…")
             model = client.get(f"/aivm_models/{settings.tts_model_uuid}")
             if model.status_code == 404:
                 path = self.root / "models/aivis" / f"{settings.tts_model_uuid}.aivmx"
