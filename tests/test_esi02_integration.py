@@ -61,6 +61,7 @@ def test_real_asr_streamed_dialogue_rion_audio_and_restart(tmp_path):
         assert session.store.records("llm_io") and not session.store.records("outcome")
         assert session.world.elapsed > 0 and session.world.body.energy < 0.85
         assert session.epoch == 1
+        assert runtime.playback_meter.level() == 0  # WAV generation alone does not move the mouth.
     finally:
         runtime.stop()
         session.close()

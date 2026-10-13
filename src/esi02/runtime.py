@@ -6,12 +6,13 @@ import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
-from esi.adapters import TTS, play_wave
+from esi.adapters import TTS
 from esi.audio import Microphone
 from esi.models import Observation
 from esi02.dialogue import Cancellation, Cancelled, DialogueLLM
 from esi02.memory_llm import MemoryLLM
 from esi02.perception import AcceleratedPerception
+from esi02.playback import PlaybackMeter, play_wave
 from esi02.session import TERMINAL
 
 
@@ -24,7 +25,7 @@ class Runtime:
         llm=None,
         tts=None,
         perception=None,
-        playback=play_wave,
+        playback=None,
         memory_llm=None,
     ):
         self.session, self.settings = session, session.settings
@@ -50,7 +51,10 @@ class Runtime:
             session.store.path.parent / "audio",
             lambda state: self._telemetry("status", ("asr_device", state)),
         )
-        self.playback = playback
+        self.playback_meter = PlaybackMeter()
+        self.playback = playback or (
+            lambda path, stop, device, routing: play_wave(path, stop, device, routing, self.playback_meter)
+        )
         self.pools = {
             name: ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"esi02-{name}")
             for name in ("llm", "voice", "recording")
@@ -613,6 +617,7 @@ class Runtime:
     def stop(self):
         self.accepting = False
         self.halt.set()
+        self.playback_meter.clear()
         self._cancel_memory()
         # Signal native playback promptly; only the owner writes the cancelled turn state.
         current = self.current

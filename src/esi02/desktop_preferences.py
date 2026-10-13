@@ -20,6 +20,7 @@ class DesktopPreferences(BaseModel):
     microphone_position: Position | None = None
     avatar_position: Position | None = None
     avatar_width: int = Field(default=300, ge=120, le=900)
+    model_path: str | None = Field(default=None, max_length=4096)
 
 
 def read_preferences(path):

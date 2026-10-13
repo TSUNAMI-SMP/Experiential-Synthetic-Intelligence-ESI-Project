@@ -243,6 +243,9 @@ class Launcher(QWidget):
                 else self.services.backend
             )
             window = self.window_factory(session, backend, self.services)
+            if offline:
+                window.connection_ready = False
+                window.refresh()
         except Exception:
             session.close()
             raise

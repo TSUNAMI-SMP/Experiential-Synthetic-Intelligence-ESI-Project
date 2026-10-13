@@ -1,6 +1,7 @@
 """ESI-02 development UI and independent desktop controls."""
 
 import math
+import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -28,6 +29,7 @@ from esi.adapters import test_tone
 from esi.devices import audio_devices, identity, load_preferences, resolve_device, save_preferences
 from esi.icons import icon
 from esi02.desktop import DesktopViews
+from esi02.preparation import PreparationResult, prepare_save, restore_services
 from esi02.presentation import BODY_SYMBOLS, activity
 from esi02.runtime import Runtime
 from esi02.session import Session
@@ -41,6 +43,12 @@ class Window(QMainWindow):
         self.session, self.runtime = session, None
         self.backend = backend or {"device": "unknown", "verified": False}
         self.services = services
+        self.connection_ready = True
+        self.preparation_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="esi02-save-prepare")
+        self.preparation = None
+        self.preparation_cancel = threading.Event()
+        self.preparation_messages = queue.Queue(maxsize=64)
+        self.closing = False
         self.audio_test = None
         self.audio_test_stop = threading.Event()
         self.audio_test_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="esi02-output-test")
@@ -71,7 +79,7 @@ class Window(QMainWindow):
         save = QPushButton("保存")
         save.setIcon(icon("save"))
         save.clicked.connect(self.save)
-        open_save = QPushButton("セーブを開く")
+        open_save = self.open_save_button = QPushButton("セーブを開く")
         open_save.setIcon(icon("folder"))
         open_save.clicked.connect(self.open_save)
         memories = QPushButton("記憶を見る・直す")
@@ -104,6 +112,30 @@ class Window(QMainWindow):
             desktop_controls.addWidget(widget)
         desktop_controls.addStretch()
         layout.addLayout(desktop_controls)
+        model_controls = QHBoxLayout()
+        self.model_label = QLabel()
+        self.model_label.setWordWrap(True)
+        model_controls.addWidget(self.model_label, 1)
+        self.choose_model_button = QPushButton("Live2Dモデルを選ぶ")
+        self.choose_model_button.clicked.connect(self.choose_model)
+        self.reload_model_button = QPushButton("モデルを再読込み")
+        self.reload_model_button.clicked.connect(self.reload_model)
+        self.still_button = QPushButton("立ち絵に戻す")
+        self.still_button.clicked.connect(lambda: self.set_model(None))
+        for button in (self.choose_model_button, self.reload_model_button, self.still_button):
+            model_controls.addWidget(button)
+        layout.addLayout(model_controls)
+        preparation_row = QHBoxLayout()
+        self.preparation_label = QLabel()
+        self.preparation_label.setWordWrap(True)
+        preparation_row.addWidget(self.preparation_label, 1)
+        self.cancel_preparation_button = QPushButton("準備を中止")
+        self.cancel_preparation_button.clicked.connect(self.cancel_preparation)
+        preparation_row.addWidget(self.cancel_preparation_button)
+        self.retry_connection_button = QPushButton("接続を確認し直す")
+        self.retry_connection_button.clicked.connect(self.retry_connection)
+        preparation_row.addWidget(self.retry_connection_button)
+        layout.addLayout(preparation_row)
         routing = QHBoxLayout()
         routing.addWidget(QLabel("入力マイク"))
         self.input_devices = QComboBox()
@@ -233,6 +265,8 @@ class Window(QMainWindow):
         self.activateWindow()
 
     def desktop_microphone(self):
+        if self.preparation or not self.connection_ready:
+            return
         self.reap_runtime()
         if self.runtime:
             self.send("microphone")
@@ -276,6 +310,10 @@ class Window(QMainWindow):
             self.error.setText(self.ui_error)
 
     def toggle(self, microphone=None):
+        if self.preparation or not self.connection_ready:
+            self.ui_error = "接続の準備が終わってから開始してください。"
+            self.error.setText(self.ui_error)
+            return
         if self.audio_test:
             self.ui_error = "音のテストが終わってから開始してください。"
             self.error.setText(self.ui_error)
@@ -312,7 +350,7 @@ class Window(QMainWindow):
         self.refresh()
 
     def test_output(self):
-        if self.runtime or self.audio_test:
+        if self.runtime or self.audio_test or self.preparation:
             return
         try:
             device = resolve_device(self.output_devices.currentData(), audio_devices(), "outputs")
@@ -326,6 +364,9 @@ class Window(QMainWindow):
             self.error.setText(self.ui_error)
 
     def send(self, name, data=None):
+        if self.preparation:
+            self.ui_error = "セーブの準備が終わってから操作してください。"
+            return False
         if not self.runtime:
             self.ui_error = "開始を押してから操作してください。"
             self.error.setText(self.ui_error)
@@ -343,6 +384,8 @@ class Window(QMainWindow):
             self.text.clear()
 
     def save(self):
+        if self.preparation:
+            return
         if self.runtime:
             self.send("save")
         else:
@@ -359,6 +402,8 @@ class Window(QMainWindow):
             self.send("recording", path)
 
     def memory_action(self, operation, data):
+        if self.preparation:
+            return False
         try:
             if self.runtime:
                 return self.send("memory", (operation, data))
@@ -378,6 +423,8 @@ class Window(QMainWindow):
         dialog.deleteLater()
 
     def world_action(self, operation, data=None):
+        if self.preparation:
+            return False
         try:
             if self.runtime:
                 return (
@@ -396,6 +443,8 @@ class Window(QMainWindow):
             return False
 
     def motivation_action(self, operation, data=None):
+        if self.preparation:
+            return False
         try:
             if self.runtime:
                 return self.send("motivation", (operation, data))
@@ -465,6 +514,8 @@ class Window(QMainWindow):
     def switch_save(self, path):
         from esi02.migration import validate_save
 
+        if self.preparation:
+            raise RuntimeError("準備中です。終わるか中止してからセーブを選んでください。")
         if self.audio_test:
             raise RuntimeError("音のテストが終わってからセーブを開いてください。")
         path = Path(path)
@@ -474,23 +525,33 @@ class Window(QMainWindow):
         if path.samefile(self.session.store.path):
             return
         candidate = Session(path)  # validate/restore before stopping the current working session
+        if self.services:
+            self.begin_preparation(candidate)
+            return
         try:
             if self.runtime:
                 self.toggle()
                 if self.runtime:
                     raise RuntimeError("動作を停止できないため、セーブを切り替えませんでした。")
-            if self.services:
-                self.services.prepare(candidate.settings)
-                self.backend = self.services.backend
+            self.finish_save_switch(candidate)
+            self.refresh()
         except Exception:
-            if self.services:
-                self.backend = self.services.backend
-            candidate.close()
+            candidate.store.close()
             raise
-        old, self.session = self.session, candidate
-        old.close()
+
+    def finish_save_switch(self, candidate):
+        path = candidate.store.path
+        # Preflight disk errors and allocate replacement views before closing the old save.
+        self.session.checkpoint()
+        replacement = DesktopViews(self, path.parent / "esi02-desktop.json")
+        try:
+            self.session.store.close()
+        except Exception:
+            replacement.shutdown()
+            raise
+        self.session = candidate
         self.desktop.shutdown()
-        self.desktop = DesktopViews(self, path.parent / "esi02-desktop.json")
+        self.desktop = replacement
         self.sync_desktop_checks()
         self.preferences_path = path.parent / "audio-devices.json"
         try:
@@ -502,8 +563,124 @@ class Window(QMainWindow):
         self.output_devices.clear()
         self.refresh_devices()
         self.ui_error = ""
-        self.refresh()
         self.save_changed.emit(str(path.resolve()))
+
+    def notify_preparation(self, message):
+        try:
+            self.preparation_messages.put_nowait(str(message))
+        except queue.Full:
+            pass
+
+    def begin_preparation(self, candidate):
+        self.preparation_cancel.clear()
+        self.preparation_label.setText("接続の準備を開始します…")
+        self.preparation = {
+            "candidate": candidate,
+            "future": self.preparation_pool.submit(
+                prepare_save,
+                self.session,
+                candidate,
+                self.runtime,
+                self.services,
+                self.preparation_cancel,
+                self.notify_preparation,
+            ),
+        }
+        self.refresh()
+
+    def cancel_preparation(self):
+        if self.preparation:
+            self.preparation_cancel.set()
+            if self.services:
+                self.services.cancel.set()
+            self.preparation_label.setText("中止しています。通信と復旧の完了を待っています…")
+
+    def retry_connection(self):
+        if not self.preparation and not self.runtime and not self.audio_test and self.services:
+            self.begin_preparation(self.session)
+
+    def poll_preparation(self):
+        if not self.preparation:
+            return
+        while not self.preparation_messages.empty():
+            self.preparation_label.setText(self.preparation_messages.get_nowait())
+        job = self.preparation
+        if not job["future"].done():
+            return
+        result = job["future"].result()
+        if result.stopped:
+            self.runtime = None
+        if self.services:
+            self.backend = dict(self.services.backend)
+        if result.ready and self.preparation_cancel.is_set() and not job.get("restoring"):
+            # Cancellation can arrive after the worker's last check and before GUI polling.
+            job["restore_needed"] = True
+            result.ready = False
+            result.error = "準備を中止しました。"
+        candidate = job["candidate"]
+        if result.ready and candidate is not self.session:
+            try:
+                self.finish_save_switch(candidate)
+            except Exception as exc:
+                result.ready = False
+                result.error = f"セーブを切り替えられません：{exc}"
+        if (
+            not result.ready
+            and not job.get("restoring")
+            and result.recovered
+            and result.stopped
+            and (job.get("restore_needed") or result.error.startswith("セーブを切り替えられません"))
+        ):
+
+            def recover():
+                error = restore_services(self.services, self.session.settings)
+                return PreparationResult(
+                    stopped=result.stopped,
+                    recovered=not error,
+                    error=result.error + ("\n" + error if error else ""),
+                )
+
+            job["restoring"] = True
+            job["future"] = self.preparation_pool.submit(recover)
+            self.preparation_label.setText("元のセーブの接続を戻しています…")
+            return
+        self.preparation = None
+        self.preparation_cancel.clear()
+        self.connection_ready = result.ready or result.recovered
+        if not result.ready and candidate is not self.session:
+            candidate.store.close()  # Do not retry a failed checkpoint during disposal.
+        self.ui_error = result.error
+        self.preparation_label.setText(
+            "接続を確認しました。" if result.ready else "元のセーブを保持しました。"
+        )
+        if self.closing:
+            QTimer.singleShot(0, self.close)
+
+    def set_model(self, path):
+        try:
+            if not self.desktop.writable:
+                raise ValueError(self.desktop.problem)
+            self.desktop.avatar.set_model(path)
+            self.desktop.preferences.model_path = (
+                str(self.desktop.avatar.model_path) if self.desktop.avatar.model_path else None
+            )
+            self.desktop.flush()
+            self.ui_error = ""
+        except Exception as exc:
+            self.ui_error = f"モデルを読み込めません：{exc}"
+        self.refresh()
+
+    def choose_model(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "書き出し済みLive2Dモデルを選ぶ", "", "Cubismモデル (*.model3.json)"
+        )
+        if path:
+            self.set_model(path)
+
+    def reload_model(self):
+        path = self.desktop.preferences.model_path
+        if path:
+            self.set_model(path)
 
     def open_save(self):
         from esi02.migration import migrate_esi01, validate_save
@@ -532,7 +709,9 @@ class Window(QMainWindow):
             self.error.setText(self.ui_error)
 
     def refresh(self):
-        self.reap_runtime()
+        self.poll_preparation()
+        if not self.preparation:
+            self.reap_runtime()
         if self.audio_test and self.audio_test.done():
             try:
                 played = self.audio_test.result()
@@ -553,9 +732,15 @@ class Window(QMainWindow):
         self.phase.setText(phase_text)
         self.phase_icon.setPixmap(icon(symbol).pixmap(32, 32))
         running = self.runtime is not None
+        preparing = self.preparation is not None
+        self.cancel_preparation_button.setVisible(preparing)
+        self.cancel_preparation_button.setEnabled(preparing and not self.preparation_cancel.is_set())
+        self.retry_connection_button.setVisible(bool(self.services) and not self.connection_ready)
+        self.retry_connection_button.setEnabled(not preparing and not running)
+        self.open_save_button.setEnabled(not preparing and not self.audio_test)
         for widget in (self.input_devices, self.output_devices, self.reload, self.on_start, self.sound_test):
-            widget.setEnabled(not running and not self.audio_test)
-        self.start_button.setEnabled(not self.audio_test)
+            widget.setEnabled(not running and not self.audio_test and not preparing)
+        self.start_button.setEnabled(not self.audio_test and not preparing and self.connection_ready)
         self.mic_button.setEnabled(running)
         self.start_button.setText("停止" if running else "開始")
         self.start_button.setIcon(icon("stop" if running else "start"))
@@ -624,16 +809,39 @@ class Window(QMainWindow):
         if content != self.conversation.toPlainText():
             self.conversation.setPlainText(content)
             self.conversation.verticalScrollBar().setValue(self.conversation.verticalScrollBar().maximum())
-        problem = status.get("error") or status.get("control_error") or self.ui_error or self.desktop.problem
+        model = self.desktop.avatar
+        self.model_label.setText(
+            "Live2D：" + str(model.model_path)
+            if model.model_path
+            else "静止画の下書き。凛音エルの完成Live2Dは制作中です。"
+        )
+        self.reload_model_button.setEnabled(bool(self.desktop.preferences.model_path) and not preparing)
+        self.choose_model_button.setEnabled(not preparing)
+        self.still_button.setEnabled(not preparing)
+        problem = (
+            status.get("error")
+            or status.get("control_error")
+            or self.ui_error
+            or self.desktop.problem
+            or model.problem
+        )
         if problem:
             self.error.setText(problem)
         else:
             self.error.clear()
         self.desktop.refresh(running, mic, symbol, phase_text, problem)
+        self.desktop.microphone.start_action.setEnabled(not preparing and self.connection_ready)
+        self.desktop.microphone.mic_action.setEnabled(not preparing and self.connection_ready)
+        self.desktop.microphone.setEnabled(not preparing)
         self.send_button.setEnabled(running)
         self.statusBar().showMessage(f"セーブ：{self.session.store.path.name} / 活動 {view['elapsed']:.1f}秒")
 
     def closeEvent(self, event):
+        if self.preparation:
+            self.closing = True
+            self.cancel_preparation()
+            event.ignore()
+            return
         self.timer.stop()
         self.audio_test_stop.set()
         if self.runtime:
@@ -646,9 +854,19 @@ class Window(QMainWindow):
                 event.ignore()
                 return
             self.runtime = None
+        try:
+            self.session.checkpoint()
+        except Exception as exc:
+            self.ui_error = f"保存できないため、セーブを開いたままにしています：{exc}"
+            self.error.setText(self.ui_error)
+            self.closing = False
+            self.timer.start(100)
+            event.ignore()
+            return
         self.desktop.shutdown()
         self.audio_test_pool.shutdown(wait=False, cancel_futures=True)
-        self.session.close()
+        self.preparation_pool.shutdown(wait=False, cancel_futures=True)
+        self.session.store.close()
         event.accept()
 
 

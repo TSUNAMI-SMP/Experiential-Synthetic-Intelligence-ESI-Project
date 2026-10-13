@@ -106,6 +106,7 @@ def test_startup_is_responsive_opens_main_and_remembers_save_chosen_in_main(app,
         selected = tmp_path / "selected.sqlite3"
         Session(selected, Settings(playback=False)).close()
         startup.window.switch_save(selected)
+        until(app, lambda: startup.window.preparation is None)
         assert read_preferences(startup.preferences_path).save_path == str(selected)
     finally:
         dispose(startup, app)

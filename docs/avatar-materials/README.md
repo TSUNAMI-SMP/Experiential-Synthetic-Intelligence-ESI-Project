@@ -31,7 +31,7 @@
 | `ParamEyeLOpen` / `ParamEyeROpen` | 0〜1の瞬き |
 | `ParamEyeBallX/Y` | 視線の左右・上下 |
 | `ParamBreath` | 身体・襟の穏やかな呼吸 |
-| `ParamMouthOpenY` | 0〜1の口の開閉。ESIの音声再生中に動かす |
+| `ParamMouthOpenY` | 0〜1の口の開閉。ESI-02では実際の出力音声の音量・再生予定時刻で動かす |
 | `ParamMouthForm` | 口形状の補助。現在のESIでは表情を自動推定して変更しない |
 
 髪・輪の揺れは物理演算の設定を `.physics3.json` として書き出します。待機モーションや表情はモデルに含められますが、現在のESIは「喜び」などを推定して任意の表情を選ぶ機能を実装していません。

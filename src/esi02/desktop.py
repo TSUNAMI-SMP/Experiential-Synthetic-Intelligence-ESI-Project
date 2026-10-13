@@ -13,9 +13,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from esi.avatar import StillCanvas
+from esi.avatar import StillCanvas, probe_model, validate_model
 from esi.icons import icon
 from esi02.desktop_preferences import read_preferences, write_preferences
+from esi02.live2d import AudioLiveCanvas
+from esi02.playback import PlaybackMeter
 
 
 def primary_area():
@@ -154,7 +156,7 @@ class MicrophoneButton(FloatingWindow):
 
 
 class AvatarWindow(FloatingWindow):
-    """Stage-5 window; the current canvas is explicitly a still-image draft."""
+    """Free-positioned still draft or a user-selected exported Cubism model."""
 
     def __init__(self):
         super().__init__("ESI-02 凛音エル — 立ち絵・制作中")
@@ -162,6 +164,9 @@ class AvatarWindow(FloatingWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         self.canvas = StillCanvas(self)
+        self.meter = PlaybackMeter()
+        self.model_path = None
+        self.problem = ""
         layout.addWidget(self.canvas, 1)
         controls = QWidget()
         controls.setStyleSheet(
@@ -197,6 +202,34 @@ class AvatarWindow(FloatingWindow):
             "ドラッグで自由に移動できます。現在は静止画です。Live2Dモデルは制作工程が残っています。"
         )
         self.set_width(300)
+
+    def set_model(self, path):
+        path = validate_model(path) if path else None
+        if path:
+            probe_model(path)
+        replacement = AudioLiveCanvas(path, self, self.meter) if path else StillCanvas(self)
+        old = self.canvas
+        if isinstance(old, AudioLiveCanvas):
+            old.release()
+        self.layout().replaceWidget(old, replacement)
+        old.hide()
+        old.deleteLater()
+        self.canvas, self.model_path, self.problem = replacement, path, ""
+        if path:
+            replacement.problem.connect(self.model_failed)
+        replacement.show()
+        self.setWindowTitle("ESI-02 アバター — " + ("Live2D" if path else "立ち絵・制作中"))
+        self.setToolTip(
+            "ドラッグで自由に移動できます。"
+            + ("書き出し済みLive2Dモデルを表示します。" if path else "現在は静止画の下書きです。")
+        )
+
+    def model_failed(self, message):
+        self.problem = message
+
+    def release(self):
+        if isinstance(self.canvas, AudioLiveCanvas):
+            self.canvas.release()
 
     def set_width(self, width):
         width = max(120, min(900, width))
@@ -241,6 +274,11 @@ class DesktopViews:
             self.problem = f"表示設定を読み込めません。元ファイルは保持しました：{exc}"
         self.microphone = MicrophoneButton()
         self.avatar = AvatarWindow()
+        if self.preferences.model_path:
+            try:
+                self.avatar.set_model(self.preferences.model_path)
+            except Exception as exc:
+                self.avatar.problem = f"モデルを読み込めません。立ち絵を表示します：{exc}"
         self.closed = False
         self.timer = QTimer(main)
         self.timer.setSingleShot(True)
@@ -299,6 +337,8 @@ class DesktopViews:
                 self.problem = f"表示設定を保存できません：{exc}"
 
     def refresh(self, running, microphone, symbol, text, problem):
+        if isinstance(self.avatar.canvas, AudioLiveCanvas):
+            self.avatar.canvas.meter = getattr(self.main.runtime, "playback_meter", None) or self.avatar.meter
         self.microphone.set_state(running, microphone, problem or self.problem)
         self.avatar.set_state(symbol, text)
 
@@ -307,5 +347,7 @@ class DesktopViews:
         self.closed = True
         self.timer.deleteLater()
         for widget in (self.microphone, self.avatar):
+            if widget is self.avatar:
+                self.avatar.release()
             widget.hide()
             widget.deleteLater()

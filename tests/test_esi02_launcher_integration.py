@@ -106,3 +106,64 @@ def test_real_owned_cpu_start_retains_verification_on_same_settings_and_restarts
     finally:
         manager.close()
     assert not manager.owned
+
+
+def test_real_gui_save_switch_restarts_owned_cpu_while_event_loop_keeps_running(tmp_path, monkeypatch):
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import QEvent, QTimer
+    from PySide6.QtWidgets import QApplication
+
+    from esi02 import gui
+    from esi02.services import Services
+
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui, "audio_devices", lambda: [])
+    (tmp_path / "models").symlink_to("/workspace/esi-environment/models", target_is_directory=True)
+    settings = Settings(
+        llm_url="http://127.0.0.1:8082",
+        llm_device="cpu",
+        context_tokens=4096,
+        playback=False,
+        asr_model_path="/workspace/esi-environment/models/faster-whisper-small",
+    )
+    old = Session(tmp_path / "old.sqlite3", settings)
+    selected = tmp_path / "other.sqlite3"
+    Session(selected, settings.model_copy(update={"context_tokens": 2048})).close()
+    manager = Services(tmp_path, {}, executable="/workspace/esi-environment/llama/llama-b11429/llama-server")
+    window = None
+    ticks = []
+    timer = QTimer()
+    timer.timeout.connect(lambda: ticks.append(time.monotonic()))
+    timer.start(10)
+    try:
+        manager.prepare(settings)
+        first = manager.owned[0]
+        window = gui.Window(old, manager.backend, manager)
+        window.on_start.setChecked(False)
+        window.show()
+        window.toggle()
+        runtime = window.runtime
+        started = time.monotonic()
+        window.switch_save(selected)
+        assert time.monotonic() - started < 0.3
+        deadline = time.monotonic() + 90
+        while window.preparation is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        assert window.preparation is None, window.preparation_label.text()
+        assert len(ticks) >= 5 and not runtime.thread.is_alive()
+        assert window.session.store.path == selected, window.ui_error
+        assert window.connection_ready and window.backend["verified"]
+        assert first.poll() is not None and manager.owned[0] is not first
+        assert manager.language_signature == manager.signature(window.session.settings)
+        with httpx.Client(trust_env=False, timeout=3) as client:
+            assert client.get("http://127.0.0.1:8080/health").json()["status"] == "ok"
+    finally:
+        timer.stop()
+        if window:
+            window.close()
+            window.deleteLater()
+            app.sendPostedEvents(None, QEvent.DeferredDelete)
+        else:
+            old.close()
+        manager.close()
