@@ -4,15 +4,15 @@
 
 ## 確認用のコードを配置する
 
-最新版は `esi-02-development` ブランチです。GitHubの `main` はESI-01なので、今回のESI-02確認には開発履歴のバックアップ `ESI-02-recovery-latest.bundle` を使います。
+最新版はGitHubの [esi-02-development ブランチ](https://github.com/TSUNAMI-SMP/Experiential-Synthetic-Intelligence-ESI-Project/tree/esi-02-development)です。`main` はESI-01のまま維持しています。完成版のZIP・リリースはまだ生成していません。
 
-Git for Windowsが使える場合、バックアップをダウンロードしたフォルダーでPowerShellを開き、次を実行します。
+Git for Windowsが使える場合、確認用フォルダーを置きたい場所でPowerShellを開き、次を実行します。既存のESI-01を上書きせず、新しい `ESI-02-check` を作ります。
 
 ```powershell
-git clone -b esi-02-development .\ESI-02-recovery-latest.bundle .\ESI-02-check
+git clone --branch esi-02-development --single-branch https://github.com/TSUNAMI-SMP/Experiential-Synthetic-Intelligence-ESI-Project.git .\ESI-02-check
 ```
 
-新しい `ESI-02-check` フォルダーにコードが入ります。Gitがない場合は先にGit for Windowsの導入が必要です。対話や開発の説明はこのクラウドチャットに残したまま進めます。
+Gitがない場合は先にGit for Windowsの導入が必要です。対話や開発の説明はこのクラウドチャットに残したまま進めます。開発履歴は検証済みの `ESI-02-recovery-latest.bundle` にも保存しています。
 
 すでにESI-01用の `models` フォルダーを持っている場合は、確認用フォルダーにもコピーして再利用できます。AIデータの指定版が違う場合は、準備画面が知らせます。使用中のESI-01と、以前手動で起動した言語ソフトは閉じてから確認を始めます。AivisSpeechは開いておき、凛音エルを登録します。
 
