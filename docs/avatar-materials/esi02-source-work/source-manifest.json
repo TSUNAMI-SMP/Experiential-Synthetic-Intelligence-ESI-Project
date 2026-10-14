@@ -1,0 +1,107 @@
+{
+  "status": "prototype_with_blink_keyforms_not_registered",
+  "canvas": [
+    1024,
+    1536
+  ],
+  "source_pixels_preserved_in_psd_layers": true,
+  "independent_reader": "psd-tools 1.24.0",
+  "cubism_editor": "5.3.04 FREE via Wine 10; actual Windows not verified",
+  "files": [
+    {
+      "path": "src/esi/resources/rion-el.png",
+      "bytes": 1381011,
+      "sha256": "d163ec402cea37c6f3224e33959e1da5ed600ded6dae958ed07bd8ac51d7f9de"
+    },
+    {
+      "path": "docs/avatar-materials/esi02-source-work/body-base-prototype.png",
+      "bytes": 1243375,
+      "sha256": "8f42f5ba6e717ebc44f9ca3703e0dafbd1da179efe2e61673504202923fe4b07"
+    },
+    {
+      "path": "docs/avatar-materials/esi02-source-work/closed-mouth-prototype.png",
+      "bytes": 390603,
+      "sha256": "8a8284581dd2e409498d720915bb26194885a08cd400a11d7f4cc828af52f979"
+    },
+    {
+      "path": "docs/avatar-materials/esi02-source-work/eye-viewer-left-closed-prototype.png",
+      "bytes": 455148,
+      "sha256": "93d8384ee8f2b93ad73fd70e8afce75b63a3d3563af45e02bc2af7cf728c1546"
+    },
+    {
+      "path": "docs/avatar-materials/esi02-source-work/eye-viewer-left-open-prototype.png",
+      "bytes": 525463,
+      "sha256": "2110bf7c22e3e904a449680f6fbb25509c6bc1d32c8b03ec6168512eb9533ba6"
+    },
+    {
+      "path": "docs/avatar-materials/esi02-source-work/eye-viewer-right-closed-prototype.png",
+      "bytes": 475732,
+      "sha256": "c49b66a2d80097e99e1454615eaa4260e788c896155d7788db05edec450400e1"
+    },
+    {
+      "path": "docs/avatar-materials/esi02-source-work/eye-viewer-right-open-prototype.png",
+      "bytes": 536074,
+      "sha256": "ed43e0568849b0bcf4670e81e8c32a6c18f6b1d5244aca3af2177f1356e9e9a5"
+    },
+    {
+      "path": "docs/avatar-materials/esi02-source-work/face-skin-prototype.png",
+      "bytes": 733220,
+      "sha256": "5e39e50f459a98d548013c372f4fe2882aad279e9c76a37c87fe6dd1c695082a"
+    },
+    {
+      "path": "docs/avatar-materials/esi02-source-work/face-skin-separated-prototype.png",
+      "bytes": 655879,
+      "sha256": "641f77d56fea1874839672bb75b92d5cc936d83930638505d7fcbea8253adc08"
+    },
+    {
+      "path": "docs/avatar-materials/esi02-source-work/hair-separated-prototype.png",
+      "bytes": 923159,
+      "sha256": "512b4ca58fcb3ba634a887660bf98151e0b9b88a5a975ea7384f81a504933d39"
+    },
+    {
+      "path": "docs/avatar-materials/esi02-source-work/halo-prototype.png",
+      "bytes": 568323,
+      "sha256": "be08a6f02e1399fb794c04699848e4df3bd3812120ae79dd4dcf75e0efe47937"
+    },
+    {
+      "path": "docs/avatar-materials/esi02-source-work/head-base-prototype.png",
+      "bytes": 700500,
+      "sha256": "a2520d59d62c504a4ab8e95493ae30fb82fa72ba4bda7f0e90fa6b09e3c01256"
+    },
+    {
+      "path": "docs/avatar-materials/esi02-source-work/open-eyes-prototype.png",
+      "bytes": 525052,
+      "sha256": "d88feb469698eec852bf9fbb5eacd5cc3e11f86bf3a4338ba558e95cfe5478d2"
+    },
+    {
+      "path": "docs/avatar-materials/esi02-source-work/open-mouth-prototype.png",
+      "bytes": 409158,
+      "sha256": "c69c3e437236b9d303fe655e3f30f23194a351a29081235933fd4fd6b7824795"
+    },
+    {
+      "path": "docs/avatar-materials/esi02-source-work/rinne-el-assembly-prototype.cmo3",
+      "bytes": 8721262,
+      "sha256": "87c4664a15c4554977ff7faa72456ab209be996ed286596522e6d1da317a0dc2"
+    },
+    {
+      "path": "docs/avatar-materials/esi02-source-work/rinne-el-assembly-prototype.psd",
+      "bytes": 69207010,
+      "sha256": "bd5225288e4c1e9842de4b66cd443b64ed0adf384b8adf83678087ee1461cc09"
+    },
+    {
+      "path": "docs/avatar-materials/esi02-source-work/rinne-el-head-separation-prototype.psd",
+      "bytes": 25166180,
+      "sha256": "e98c97b422262b0b1172989e855e38ed7bb788e9e9996014a07fe6ac8a54d290"
+    },
+    {
+      "path": "docs/avatar-materials/esi02-source-work/rinne-el-source-prototype.cmo3",
+      "bytes": 4088546,
+      "sha256": "a938d5a28b0c3f8c6c3e123150a8109ddf27dd08321724cd3763bcdeb1e60600"
+    },
+    {
+      "path": "docs/avatar-materials/esi02-source-work/rinne-el-source-prototype.psd",
+      "bytes": 31457738,
+      "sha256": "908cdc83996f77ddda80456c701818bea70ca5a25b89357aeda7f47311feb1ba"
+    }
+  ]
+}
