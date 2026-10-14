@@ -14,6 +14,7 @@ from esi03.session import Session
 
 
 class Window(PreviousWindow):
+    growth_panel_class = GrowthPanel
     release_name = "ESI-03"
     heading_text = "ESI-03  |  自分を大切にし、経験から学ぶ"
     window_title = "ESI-03 — 会話・成長・探索"
@@ -30,7 +31,7 @@ class Window(PreviousWindow):
 
     def __init__(self, session, backend=None, services=None):
         super().__init__(session, backend, services)
-        self.growth_panel = GrowthPanel(self)
+        self.growth_panel = self.growth_panel_class(self)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(self.growth_panel)

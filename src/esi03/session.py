@@ -34,8 +34,8 @@ class SavedState(PreviousSavedState):
     experience: ExperienceState
 
 
-def validate_state(state):
-    value = SavedState.model_validate(state)
+def validate_state(state, state_class=SavedState):
+    value = state_class.model_validate(state)
     identifiers = [turn.id for turn in value.turns]
     if len(set(identifiers)) != len(identifiers) or any(turn.epoch > value.epoch for turn in value.turns):
         raise ValueError("会話の保存番号が整合していません。")
@@ -44,21 +44,22 @@ def validate_state(state):
     return value
 
 
-def inspect_database(path):
+def inspect_database(path, settings_class=Settings, state_class=SavedState,
+                     settings_key="esi03_settings", live_key="esi03_live"):
     db = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True)
     try:
         if db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
             raise ValueError("セーブの整合性を確認できません。")
-        row = db.execute("SELECT value FROM metadata WHERE key='esi03_settings'").fetchone()
+        row = db.execute("SELECT value FROM metadata WHERE key=?", (settings_key,)).fetchone()
         if not row:
             raise ValueError("ESI-03のセーブではありません。旧セーブはコピー移行してください。")
-        settings = Settings.model_validate(json.loads(row[0]))
-        live = db.execute("SELECT value FROM metadata WHERE key='esi03_live'").fetchone()
+        settings = settings_class.model_validate(json.loads(row[0]))
+        live = db.execute("SELECT value FROM metadata WHERE key=?", (live_key,)).fetchone()
         snapshot = db.execute("SELECT payload FROM snapshots ORDER BY rowid DESC LIMIT 1").fetchone()
         if not live or not snapshot:
             raise ValueError("ESI-03の保存状態がありません。")
-        validate_state(json.loads(live[0]))
-        validate_state(json.loads(snapshot[0]))
+        validate_state(json.loads(live[0]), state_class)
+        validate_state(json.loads(snapshot[0]), state_class)
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if "esi03_beliefs" in tables:
             active = set()
@@ -79,35 +80,54 @@ def inspect_database(path):
 
 
 class Session(PreviousSession):
+    release_name = "ESI-03"
+    settings_class = Settings
+    state_class = SavedState
+    world_class = World
+    experience_class = Experience
+    brain_class = Brain
+    beliefs_class = Beliefs
+    preferences_class = Preferences
+    settings_key = "esi03_settings"
+    live_key = "esi03_live"
+
+    @classmethod
+    def inspect_save(cls, path):
+        return inspect_database(path, cls.settings_class, cls.state_class, cls.settings_key, cls.live_key)
+
+    def restore_additional(self, state):
+        pass
+
     def __init__(self, path, settings=None, character=None):
         path = Path(path)
-        stored = inspect_database(path) if path.exists() else None
-        self.settings = settings or stored or Settings()
+        stored = self.inspect_save(path) if path.exists() else None
+        self.settings = settings or stored or self.settings_class()
         if stored and self.settings.fingerprint != stored.fingerprint:
             raise ValueError("保存済みの実行設定と異なります。設定画面から停止中に変更してください。")
         self.store = Store(path, max_records=self.settings.max_records)
         self.lock = threading.RLock()
         self.elapsed, self.epoch = 0.0, 0
         self.turns = OrderedDict()
-        self.world = World()
+        self.world = self.world_class()
         self.status = {"running": False, "phase": "stopped", "microphone": "stopped"}
         self.agent_id = self.store.meta("agent_id")
-        self.experience = Experience()
-        self.brain = Brain(self.agent_id, self.world, self.experience)
+        self.experience = self.experience_class()
+        self.brain = self.brain_class(self.agent_id, self.world, self.experience)
         self.tool_policy = None
         try:
-            live = self.store.meta("esi03_live")
+            live = self.store.meta(self.live_key)
             if live:
-                state = validate_state(live)
+                state = validate_state(live, self.state_class)
                 self.elapsed, self.epoch = state.elapsed, state.epoch
                 self.turns = OrderedDict((turn.id, turn.model_dump()) for turn in state.turns)
                 self.world = state.world
-                self.experience = Experience(state.experience.model_dump())
-                self.brain = Brain(self.agent_id, self.world, self.experience, state.motivation.model_dump())
+                self.experience = self.experience_class(state.experience.model_dump())
+                self.brain = self.brain_class(self.agent_id, self.world, self.experience, state.motivation.model_dump())
+                self.restore_additional(state)
             elif character is not None:
                 self.experience.state.character = Character.model_validate(character)
             self.memory = Memory(self.store)
-            self.knowledge = Beliefs(self.store, self.experience.state.character)
+            self.knowledge = self.beliefs_class(self.store, self.experience.state.character)
             self.store.db.execute("CREATE TABLE IF NOT EXISTS esi03_outcomes (id TEXT PRIMARY KEY)")
             self.store.db.execute(
                 "CREATE TABLE IF NOT EXISTS esi03_evidence (id TEXT PRIMARY KEY, payload TEXT NOT NULL)"
@@ -133,7 +153,7 @@ class Session(PreviousSession):
                     self._remember(turn)
             self._prune()
             if not stored:
-                self.store.set_meta("esi03_settings", self.settings.model_dump())
+                self.store.set_meta(self.settings_key, self.settings.model_dump())
             self.checkpoint(initial=not live)
         except Exception:
             self.store.close()
@@ -141,7 +161,7 @@ class Session(PreviousSession):
 
     def dump(self):
         return {
-            "release": "ESI-03",
+            "release": self.release_name,
             "schema_version": 1,
             "elapsed": self.elapsed,
             "epoch": self.epoch,
@@ -152,14 +172,15 @@ class Session(PreviousSession):
         }
 
     def restore(self, snapshot):
-        state = validate_state(snapshot)
+        state = validate_state(snapshot, self.state_class)
         seen = self.experience.seen_outcome
         self.elapsed, self.epoch = state.elapsed, state.epoch
         self.turns = OrderedDict((turn.id, turn.model_dump()) for turn in state.turns)
         self.world = state.world
-        self.experience = Experience(state.experience.model_dump())
+        self.experience = self.experience_class(state.experience.model_dump())
         self.experience.seen_outcome = seen
-        self.brain = Brain(self.agent_id, self.world, self.experience, state.motivation.model_dump())
+        self.brain = self.brain_class(self.agent_id, self.world, self.experience, state.motivation.model_dump())
+        self.restore_additional(state)
         self.knowledge.character = self.experience.state.character
         for memory in (self.memory, self.knowledge):
             memory.revision = self.store.meta(memory.REVISION) or 0
@@ -176,7 +197,7 @@ class Session(PreviousSession):
 
     def _write(self, events=()):
         value = self.dump()
-        validate_state(value)
+        validate_state(value, self.state_class)
         with self.store.lock, self.store.db:
             self.store.db.executemany(
                 "INSERT OR IGNORE INTO esi03_outcomes VALUES (?)",
@@ -190,8 +211,8 @@ class Session(PreviousSession):
                 ],
             )
             self.store.db.execute(
-                "INSERT OR REPLACE INTO metadata VALUES ('esi03_live',?)",
-                (json.dumps(value, ensure_ascii=False, allow_nan=False),),
+                "INSERT OR REPLACE INTO metadata VALUES (?,?)",
+                (self.live_key, json.dumps(value, ensure_ascii=False, allow_nan=False)),
             )
 
     def _persist(self, turn):
@@ -302,7 +323,7 @@ class Session(PreviousSession):
     def character_operation(self, operation, data):
         with self.lock:
             if operation == "preferences":
-                value = Preferences.model_validate({**self.experience.state.preferences.model_dump(), **data})
+                value = self.preferences_class.model_validate({**self.experience.state.preferences.model_dump(), **data})
                 self.experience.state.preferences = value
             elif operation == "character":
                 value = Character.model_validate(data)
@@ -359,13 +380,13 @@ class Session(PreviousSession):
     def change_runtime_settings(self, values):
         if self.status.get("running"):
             raise RuntimeError("言語・音声の実行設定は停止中に変更してください。")
-        settings = Settings.model_validate(values)
+        settings = self.settings_class.model_validate(values)
         if settings.flash_attention == "off" and settings.cache_type != "f16":
             raise ValueError("量子化KVキャッシュにはFlashAttentionをAUTOまたはONにしてください。")
         previous = self.settings
         self.settings = settings
         try:
-            self.store.set_meta("esi03_settings", settings.model_dump())
+            self.store.set_meta(self.settings_key, settings.model_dump())
             self.experience.trace(
                 "runtime_settings",
                 "本人が言語・音声の実行設定を変更",
@@ -422,7 +443,7 @@ class Session(PreviousSession):
         with self.lock:
             view = super().view()
             view.update(
-                release="ESI-03",
+                release=self.release_name,
                 character=self.experience.state.model_dump(),
                 beliefs={
                     "count": len(self.knowledge.entries()),

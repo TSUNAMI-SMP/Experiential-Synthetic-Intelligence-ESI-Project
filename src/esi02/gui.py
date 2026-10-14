@@ -46,6 +46,14 @@ class Window(QMainWindow):
     def new_runtime(self, *args):
         return Runtime(*args)
 
+    def new_desktop(self, path):
+        return DesktopViews(self, path)
+
+    def new_world_panel(self):
+        from esi02.world_gui import WorldPanel
+
+        return WorldPanel(self)
+
     def new_session(self, path):
         return Session(path)
 
@@ -226,9 +234,7 @@ class Window(QMainWindow):
         self.conversation.setReadOnly(True)
         self.tabs = QTabWidget()
         self.tabs.addTab(self.conversation, "会話")
-        from esi02.world_gui import WorldPanel
-
-        self.world_panel = WorldPanel(self)
+        self.world_panel = self.new_world_panel()
         world_scroll = QScrollArea()
         world_scroll.setWidgetResizable(True)
         world_scroll.setWidget(self.world_panel)
@@ -277,7 +283,7 @@ class Window(QMainWindow):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
         self.timer.start(100)
-        self.desktop = DesktopViews(self, session.store.path.parent / self.desktop_filename)
+        self.desktop = self.new_desktop(session.store.path.parent / self.desktop_filename)
         self.sync_desktop_checks()
         self.refresh_devices()
         self.refresh()
@@ -574,7 +580,7 @@ class Window(QMainWindow):
         path = candidate.store.path
         # Preflight disk errors and allocate replacement views before closing the old save.
         self.session.checkpoint()
-        replacement = DesktopViews(self, path.parent / self.desktop_filename)
+        replacement = self.new_desktop(path.parent / self.desktop_filename)
         try:
             self.session.store.close()
         except Exception:

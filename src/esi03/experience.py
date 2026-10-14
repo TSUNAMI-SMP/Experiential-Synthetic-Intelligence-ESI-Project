@@ -10,8 +10,11 @@ from esi03.personality import Goal, Interest, Needs, State, Trace
 
 
 class Experience:
+    state_class = State
+    initial_question_delay = 30
+
     def __init__(self, state=None):
-        self.state = State.model_validate(state) if state is not None else State()
+        self.state = self.state_class.model_validate(state) if state is not None else self.state_class()
         self.seen_outcome = None
         if not self.state.interests:
             initial = self.interest(
@@ -21,7 +24,7 @@ class Experience:
                 "growth",
                 "initial:growth",
             )
-            initial.next_at = self.state.elapsed + 30
+            initial.next_at = self.state.elapsed + self.initial_question_delay
 
     def trace(self, kind, description, source_id, **details):
         state = self.state

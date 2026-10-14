@@ -159,6 +159,8 @@ class MicrophoneButton(FloatingWindow):
 class AvatarWindow(FloatingWindow):
     """Free-positioned bundled or custom Cubism model, with a still illustration."""
 
+    canvas_class = AudioLiveCanvas
+
     def __init__(self, release_name="ESI-02"):
         self.release_name = release_name
         super().__init__(release_name + " 凛音エル — 立ち絵")
@@ -210,7 +212,7 @@ class AvatarWindow(FloatingWindow):
         path = validate_model(path) if path else None
         if path:
             probe_model(path)
-        replacement = AudioLiveCanvas(path, self, self.meter) if path else StillCanvas(self)
+        replacement = self.canvas_class(path, self, self.meter) if path else StillCanvas(self)
         old = self.canvas
         if isinstance(old, AudioLiveCanvas):
             old.release()
@@ -275,6 +277,8 @@ class AvatarWindow(FloatingWindow):
 class DesktopViews:
     """GUI-owned views, routed to the one runtime owned by the main window."""
 
+    avatar_class = AvatarWindow
+
     def __init__(self, main, path):
         self.main, self.path = main, path
         self.problem = ""
@@ -289,7 +293,7 @@ class DesktopViews:
             self.problem = f"表示設定を読み込めません。元ファイルは保持しました：{exc}"
         release_name = getattr(main, "release_name", "ESI-02")
         self.microphone = MicrophoneButton(release_name)
-        self.avatar = AvatarWindow(release_name)
+        self.avatar = self.avatar_class(release_name)
         if self.preferences.model_path:
             try:
                 self.avatar.set_model(self.preferences.model_path)
