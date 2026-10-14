@@ -14,8 +14,8 @@
   "files": [
     {
       "path": "rinne-el.2048/texture_00.png",
-      "bytes": 1339064,
-      "sha256": "89bf8fd95d40706f955e1c189a461e2170cf83ef7cbb9af3041db2f4fbcd4696"
+      "bytes": 1300497,
+      "sha256": "ab71fb50e42cac11db4b939078ddc465baa7fde386399be97a6d9cef927233d3"
     },
     {
       "path": "rinne-el.cdi3.json",
@@ -24,8 +24,8 @@
     },
     {
       "path": "rinne-el.moc3",
-      "bytes": 23488,
-      "sha256": "b56e0c5008693535dba730258dd8330b11710a9d85dc7de8969c6f6039464c93"
+      "bytes": 30336,
+      "sha256": "5bd61d954eb29ebd4d12528c31c05d042cef920a5b2e4b61feb5e7aea65a6aa5"
     },
     {
       "path": "rinne-el.model3.json",
@@ -37,5 +37,16 @@
       "bytes": 1997,
       "sha256": "850e794f22b70296d7c428ce550a704eb155c71187d3d3a2b1b2e4720de3002f"
     }
-  ]
+  ],
+  "normal_eye_brow_symmetry_checked": true,
+  "closed_eye_brow_symmetry_checked": true,
+  "hand_digits_visual_checked": {
+    "left": 5,
+    "right": 5
+  },
+  "blink_rendering": "discrete_open_closed_in_esi02",
+  "neck_draw_order": 450,
+  "body_draw_order": 500,
+  "source_reexport_identical": true,
+  "windows_startup_reported": true
 }

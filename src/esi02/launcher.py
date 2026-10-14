@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from esi.icons import icon
+from esi02.assets import DownloadProgress
 from esi02.config import Settings
 from esi02.desktop_preferences import write_json
 from esi02.gui import Window
@@ -149,7 +150,7 @@ class Launcher(QWidget):
 
     def notify(self, message):
         try:
-            self.messages.put_nowait(str(message))
+            self.messages.put_nowait(message if isinstance(message, DownloadProgress) else str(message))
         except queue.Full:
             pass  # Telemetry must never block a cancellation or the startup worker.
 
@@ -229,7 +230,16 @@ class Launcher(QWidget):
             self.diagnostics_button.setEnabled(not self.closing)
         if not self.closing:
             while not self.messages.empty():
-                self.status.setText(self.messages.get_nowait())
+                message = self.messages.get_nowait()
+                self.status.setText(str(message))
+                if isinstance(message, DownloadProgress) and message.percent is not None:
+                    self.progress.setRange(0, 100)
+                    self.progress.setValue(message.percent)
+                elif isinstance(message, DownloadProgress) and message.phase == "complete":
+                    self.progress.setRange(0, 100)
+                    self.progress.setValue(100)
+                else:
+                    self.progress.setRange(0, 0)
         if self.future and self.future.done():
             completed, self.future = self.future, None
             if self.closing:

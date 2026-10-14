@@ -27,6 +27,7 @@ DRAWABLES = {
 PHASES = [
     ("default", None, 0), ("mouth", "ParamMouthOpenY", 1),
     ("left_blink", "ParamEyeLOpen", 0), ("right_blink", "ParamEyeROpen", 0),
+    ("left_mid_blink", "ParamEyeLOpen", 0.5), ("right_mid_blink", "ParamEyeROpen", 0.5),
     ("horizontal", "ParamAngleX", 30), ("vertical", "ParamAngleY", 30),
     ("tilt", "ParamAngleZ", 30), ("breath", "ParamBreath", 1),
     ("body", "ParamBodyAngleX", 10), ("hair", "ParamHairFront", 1),
@@ -48,6 +49,7 @@ class FixedCanvas(AudioLiveCanvas):
         self.model.Update()
         for name, value in self.pose.items():
             self.model.SetParamById(name, value)
+        self.apply_blink_visibility()
         self.model.Draw()
 
 
@@ -85,6 +87,17 @@ def verify(model_path, output):
             digest = hashlib.sha256(bytes(frame.constBits())).hexdigest()
             if phase == "default":
                 baseline.update(vertices=vertices, digest=digest)
+                left, right = vertices["Eye_viewer_left_open"], vertices["Eye_viewer_right_open"]
+                assert left.shape == right.shape, "Normal eyes have different mesh shapes"
+                assert np.allclose(left[:, 1], right[:, 1], atol=1e-6, rtol=0), "Normal eyes/brows have different heights"
+                mirror_axis = (left[:, 0] + right[:, 0]) / 2
+                assert np.allclose(mirror_axis, mirror_axis[0], atol=1e-6, rtol=0), "Normal eyes/brows are not mirrored"
+                closed_left, closed_right = vertices["Eye_viewer_left_closed"], vertices["Eye_viewer_right_closed"]
+                assert closed_left.shape == closed_right.shape, "Closed eyes have different mesh shapes"
+                assert np.allclose(closed_left[:, 1], closed_right[:, 1], atol=1e-6, rtol=0), "Closed eyes/brows have different heights"
+                closed_axis = (closed_left[:, 0] + closed_right[:, 0]) / 2
+                assert np.allclose(closed_axis, closed_axis[0], atol=1e-6, rtol=0), "Closed eyes/brows are not mirrored"
+                assert abs(closed_axis[0] - mirror_axis[0]) < 0.005, "Blink drawings are off the face center"
                 assert frame.pixelColor(0, 0).alpha() == 0, "Background is opaque"
                 assert any(frame.pixelColor(x, y).alpha() for x in range(0, frame.width(), 10)
                            for y in range(0, frame.height(), 10)), "Character did not render"
@@ -100,8 +113,12 @@ def verify(model_path, output):
                 assert changed == DRAWABLES - {"Body_base"}, f"{phase} changed the wrong layers"
             if phase in {"breath", "body"}:
                 assert changed == DRAWABLES, f"{phase} has no deformation or an unparented layer"
-            if phase in {"left_blink", "right_blink"}:
+            if phase in {"left_blink", "right_blink", "left_mid_blink", "right_mid_blink"}:
                 assert not changed, "Opacity-based blink moved the meshes"
+                if "mid" in phase:
+                    assert digest == baseline[phase.replace("mid_", "")], "Mid-blink mixed the two eye drawings"
+                else:
+                    baseline[phase] = digest
             results.append({"phase": phase, "changed": sorted(changed), "frame_changed": digest != baseline["digest"]})
             frame.save(str(output / f"{phase}.png"))
             if len(results) < len(PHASES):

@@ -331,6 +331,24 @@ def test_interrupted_asset_download_removes_partial_and_never_replaces_existing_
     assert destination.read_bytes() == b"user-model"
 
 
+def test_launcher_displays_known_transfer_and_switches_to_verification(app, tmp_path, monkeypatch):
+    from esi02.assets import DownloadProgress
+
+    startup = make_launcher(tmp_path, monkeypatch)
+    startup.enabled(False)
+    startup.notify(DownloadProgress("model.gguf", "download", 500_000, 1_000_000, 250_000))
+    startup.poll()
+    assert startup.progress.maximum() == 100 and startup.progress.value() == 50
+    assert "0.25 MB/秒" in startup.status.text() and "残り約" in startup.status.text()
+    startup.notify(DownloadProgress("model.gguf", "verify"))
+    startup.poll()
+    assert startup.progress.maximum() == 0 and "照合中" in startup.status.text()
+    startup.notify(DownloadProgress("model.gguf", "download", 500_000, None, 250_000))
+    startup.poll()
+    assert startup.progress.maximum() == 0 and "総容量不明" in startup.status.text()
+    dispose(startup, app)
+
+
 def test_owned_gpu_verification_is_kept_for_same_settings_and_context_change_restarts_owned_only(
     tmp_path, monkeypatch
 ):

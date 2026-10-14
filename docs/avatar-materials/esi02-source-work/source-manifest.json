@@ -9,14 +9,14 @@
   "cubism_editor": "5.3.04 FREE via Wine 10; actual Windows not verified",
   "files": [
     {
-      "path": "src/esi/resources/rion-el.png",
-      "bytes": 1381011,
-      "sha256": "d163ec402cea37c6f3224e33959e1da5ed600ded6dae958ed07bd8ac51d7f9de"
-    },
-    {
       "path": "docs/avatar-materials/esi02-source-work/body-base-prototype.png",
       "bytes": 1243375,
       "sha256": "8f42f5ba6e717ebc44f9ca3703e0dafbd1da179efe2e61673504202923fe4b07"
+    },
+    {
+      "path": "docs/avatar-materials/esi02-source-work/body-five-fingers.png",
+      "bytes": 1245064,
+      "sha256": "28cf7347c76eefb83c2727353cb9558a7e4baeb0a99952823cc35ae095acdd66"
     },
     {
       "path": "docs/avatar-materials/esi02-source-work/closed-mouth-prototype.png",
@@ -89,14 +89,19 @@
       "sha256": "bd5225288e4c1e9842de4b66cd443b64ed0adf384b8adf83678087ee1461cc09"
     },
     {
+      "path": "docs/avatar-materials/esi02-source-work/rinne-el-hands-correction.psd",
+      "bytes": 18874626,
+      "sha256": "a430bd5d6086a1dad64739361a072b996cc3ae2368048b17e98eef21565ef90a"
+    },
+    {
       "path": "docs/avatar-materials/esi02-source-work/rinne-el-head-separation-prototype.psd",
       "bytes": 25166180,
       "sha256": "e98c97b422262b0b1172989e855e38ed7bb788e9e9996014a07fe6ac8a54d290"
     },
     {
       "path": "docs/avatar-materials/esi02-source-work/rinne-el-rigged-working.cmo3",
-      "bytes": 11381276,
-      "sha256": "3ba3e7c0c5add4a462c29055e2446d475ca3d72ce2ced3318b83d275dc6d7f5b"
+      "bytes": 13379296,
+      "sha256": "c23203f4e1742109ad7bf433f4b8cd221c862652b2d40901e21d6162ac40a029"
     },
     {
       "path": "docs/avatar-materials/esi02-source-work/rinne-el-source-prototype.cmo3",
@@ -107,6 +112,13 @@
       "path": "docs/avatar-materials/esi02-source-work/rinne-el-source-prototype.psd",
       "bytes": 31457738,
       "sha256": "908cdc83996f77ddda80456c701818bea70ca5a25b89357aeda7f47311feb1ba"
+    },
+    {
+      "path": "src/esi/resources/rion-el.png",
+      "bytes": 1381011,
+      "sha256": "d163ec402cea37c6f3224e33959e1da5ed600ded6dae958ed07bd8ac51d7f9de"
     }
-  ]
+  ],
+  "patch": "five_fingers_symmetric_open_closed_eyes_neck_behind_collar",
+  "saved_source_reexport_identical": true
 }

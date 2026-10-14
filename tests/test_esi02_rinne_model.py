@@ -51,7 +51,7 @@ def test_native_bundled_character_has_real_deformation_and_transparent_rendering
     )
     assert result.returncode == 0, result.stdout + result.stderr
     report = json.loads((tmp_path / "native/geometry.json").read_text())
-    assert len(report["phases"]) == 11
+    assert len(report["phases"]) == 13
     assert report["physical_audio_verified"] is False
 
 

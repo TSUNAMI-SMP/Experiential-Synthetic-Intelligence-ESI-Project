@@ -3,8 +3,10 @@
 import hashlib
 import os
 import tempfile
+import time
 import urllib.request
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 
 BINARIES = {
@@ -27,18 +29,74 @@ BINARIES = {
 }
 
 
+def size_text(size):
+    return f"{size / 1_000_000_000:.2f} GB" if size >= 1_000_000_000 else f"{size / 1_000_000:.1f} MB"
+
+
+@dataclass(frozen=True)
+class DownloadProgress:
+    name: str
+    phase: str
+    received: int = 0
+    total: int | None = None
+    speed: float = 0
+
+    @property
+    def percent(self):
+        if self.phase != "download" or not self.total:
+            return None
+        return min(100, self.received * 100 // self.total)
+
+    def __str__(self):
+        if self.phase == "verify":
+            return f"{self.name}：ファイルを照合中です…"
+        if self.phase == "complete":
+            return f"{self.name}：準備できました（照合済み）"
+        if self.phase == "connect":
+            return f"{self.name}：ダウンロード先へ接続中です…"
+        amount = size_text(self.received)
+        amount += f" / {size_text(self.total)}（{self.percent}%）" if self.total else " / 総容量不明"
+        speed = f"{self.speed / 1_000_000:.2f} MB/秒" if self.speed > 0 else "速度を計測中"
+        remaining = "残り時間は計測中"
+        if self.total and self.speed > 0:
+            seconds = max(0, int((self.total - self.received) / self.speed))
+            remaining = f"残り約{seconds // 60}分{seconds % 60:02d}秒"
+        elif not self.total:
+            remaining = "残り時間は不明"
+        return f"{self.name}：ダウンロード中\nこのファイル：{amount} ｜ {speed} ｜ {remaining}"
+
+
+def verify_file(path, digest, cancel):
+    checksum = hashlib.sha256()
+    with path.open("rb") as stream:
+        while block := stream.read(1024 * 1024):
+            if cancel is not None and cancel.is_set():
+                raise RuntimeError("準備を中止しました。")
+            checksum.update(block)
+    return checksum.hexdigest() == digest
+
+
 def download(url, path, digest, notify=lambda message: None, cancel=None):
     path = Path(path)
     if path.exists():
-        with path.open("rb") as stream:
-            if hashlib.file_digest(stream, "sha256").hexdigest() != digest:
-                raise ValueError("既存のダウンロードが指定ハッシュと一致しません。ファイルは保持しました。")
+        notify(DownloadProgress(path.name, "verify"))
+        if not verify_file(path, digest, cancel):
+            raise ValueError("既存のダウンロードが指定ハッシュと一致しません。ファイルは保持しました。")
+        notify(DownloadProgress(path.name, "complete"))
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_suffix(path.suffix + ".partial")
     try:
+        notify(DownloadProgress(path.name, "connect"))
         with urllib.request.urlopen(url, timeout=30) as response, partial.open("wb") as stream:
-            received, reported = 0, 0
+            try:
+                total = int(getattr(response, "headers", {}).get("Content-Length", "0"))
+            except (TypeError, ValueError):
+                total = 0
+            total = total if total > 0 else None
+            received = 0
+            started = reported = time.monotonic()
+            notify(DownloadProgress(path.name, "download", total=total))
             while True:
                 if cancel is not None and cancel.is_set():
                     raise RuntimeError("準備を中止しました。")
@@ -47,13 +105,26 @@ def download(url, path, digest, notify=lambda message: None, cancel=None):
                     break
                 stream.write(block)
                 received += len(block)
-                if received - reported >= 32 * 1024 * 1024:
-                    notify(f"{path.name}：{received / 1024**2:.0f} MBを受信しました…")
-                    reported = received
-        with partial.open("rb") as stream:
-            if hashlib.file_digest(stream, "sha256").hexdigest() != digest:
-                raise ValueError("言語ソフトのハッシュが一致しません。")
+                now = time.monotonic()
+                if now - reported >= 1:
+                    notify(
+                        DownloadProgress(
+                            path.name, "download", received, total, received / max(now - started, 0.001)
+                        )
+                    )
+                    reported = now
+            notify(
+                DownloadProgress(
+                    path.name, "download", received, total, received / max(time.monotonic() - started, 0.001)
+                )
+            )
+        if total is not None and received != total:
+            raise ValueError("ダウンロードが途中で終了しました。再試行してください。")
+        notify(DownloadProgress(path.name, "verify", received, total))
+        if not verify_file(partial, digest, cancel):
+            raise ValueError("ダウンロードしたファイルのハッシュが一致しません。")
         partial.replace(path)
+        notify(DownloadProgress(path.name, "complete", received, total))
     finally:
         partial.unlink(missing_ok=True)
 
