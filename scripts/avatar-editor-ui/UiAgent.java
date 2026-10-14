@@ -4,7 +4,7 @@ import java.lang.instrument.Instrumentation;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 import javax.swing.*;
 import javax.swing.text.JTextComponent;
 import com.sun.net.httpserver.HttpServer;
@@ -36,6 +36,7 @@ public class UiAgent {
   String text="";
   if(c instanceof AbstractButton) text=((AbstractButton)c).getText();
   else if(c instanceof JLabel)text=((JLabel)c).getText();
+  else if(c instanceof JPasswordField)text="[password]";
   else if(c instanceof JTextComponent)text=((JTextComponent)c).getText();
   else if(c instanceof Frame)text=((Frame)c).getTitle();
   else if(c instanceof Dialog)text=((Dialog)c).getTitle();
@@ -47,6 +48,14 @@ public class UiAgent {
    ",\"text\":"+quote(text)+",\"name\":"+quote(c.getName())+",\"showing\":"+c.isShowing()+
    ",\"enabled\":"+c.isEnabled()+",\"x\":"+bounds.x+",\"y\":"+bounds.y+
    ",\"w\":"+bounds.width+",\"h\":"+bounds.height;
+  if(c instanceof JComponent)row+=",\"tooltip\":"+quote(((JComponent)c).getToolTipText());
+  if(c instanceof AbstractButton)row+=",\"selected\":"+((AbstractButton)c).isSelected();
+  if(c instanceof JComboBox) {
+   JComboBox<?> combo=(JComboBox<?>)c;
+   StringJoiner items=new StringJoiner(",","[","]");
+   for(int i=0;i<Math.min(combo.getItemCount(),500);i++)items.add(quote(String.valueOf(combo.getItemAt(i))));
+   row+=",\"items\":"+items;
+  }
   if(c instanceof JTable) {
    JTable t=(JTable)c;
    StringJoiner data=new StringJoiner(",","[","]");
@@ -55,7 +64,10 @@ public class UiAgent {
     for(int col=0;col<t.getColumnCount();col++)values.add(quote(String.valueOf(t.getValueAt(r,col))));
     data.add(values.toString());
    }
-   row+=",\"cells\":"+data;
+   row+=",\"cells\":"+data+",\"row_height\":"+t.getRowHeight();
+   StringJoiner selection=new StringJoiner(",","[","]");
+   for(int selected:t.getSelectedRows())selection.add(String.valueOf(selected));
+   row+=",\"selected_rows\":"+selection;
   }
   rows.add(row+"}");
   if(c instanceof JMenu)for(Component child:((JMenu)c).getMenuComponents())visit(child,n,rows,seen);
@@ -74,6 +86,17 @@ public class UiAgent {
    if(kv.length==2)data.put(URLDecoder.decode(kv[0],StandardCharsets.UTF_8),URLDecoder.decode(kv[1],StandardCharsets.UTF_8));
   }
   return data;
+ }
+ static String threadSnapshot() {
+  StringJoiner rows=new StringJoiner(",","[","]");
+  for(Map.Entry<Thread,StackTraceElement[]> entry:Thread.getAllStackTraces().entrySet()) {
+   Thread thread=entry.getKey();
+   StringJoiner stack=new StringJoiner(",","[","]");
+   StackTraceElement[] frames=entry.getValue();
+   for(int i=0;i<Math.min(frames.length,32);i++)stack.add(quote(frames[i].toString()));
+   rows.add("{\"name\":"+quote(thread.getName())+",\"state\":"+quote(thread.getState().toString())+",\"stack\":"+stack+"}");
+  }
+  return rows.toString();
  }
  static void action(Map<String,String> data) {
   Component c=controls.get(Integer.parseInt(data.get("id")));
@@ -110,8 +133,20 @@ public class UiAgent {
   server.createContext("/tree",exchange->{
    try {
     if(!exchange.getRequestMethod().equals("GET"))throw new IllegalArgumentException("GET only");
-    String[] result={null};SwingUtilities.invokeAndWait(()->result[0]=snapshot());
-    byte[] bytes=result[0].getBytes(StandardCharsets.UTF_8);
+    FutureTask<String> task=new FutureTask<>(()->snapshot());
+    SwingUtilities.invokeLater(task);
+    String result;
+    try {result=task.get(5,TimeUnit.SECONDS);}catch(TimeoutException e){task.cancel(false);throw e;}
+    byte[] bytes=result.getBytes(StandardCharsets.UTF_8);
+    exchange.getResponseHeaders().set("Content-Type","application/json; charset=utf-8");
+    exchange.sendResponseHeaders(200,bytes.length);exchange.getResponseBody().write(bytes);
+   }catch(Exception e){byte[] b=e.toString().getBytes(StandardCharsets.UTF_8);exchange.sendResponseHeaders(400,b.length);exchange.getResponseBody().write(b);}
+   finally {exchange.close();}
+  });
+  server.createContext("/threads",exchange->{
+   try {
+    if(!exchange.getRequestMethod().equals("GET"))throw new IllegalArgumentException("GET only");
+    byte[] bytes=threadSnapshot().getBytes(StandardCharsets.UTF_8);
     exchange.getResponseHeaders().set("Content-Type","application/json; charset=utf-8");
     exchange.sendResponseHeaders(200,bytes.length);exchange.getResponseBody().write(bytes);
    }catch(Exception e){byte[] b=e.toString().getBytes(StandardCharsets.UTF_8);exchange.sendResponseHeaders(400,b.length);exchange.getResponseBody().write(b);}

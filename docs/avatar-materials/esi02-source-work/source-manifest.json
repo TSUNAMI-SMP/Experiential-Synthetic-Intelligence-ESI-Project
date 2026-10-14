@@ -1,5 +1,5 @@
 {
-  "status": "prototype_with_blink_keyforms_not_registered",
+  "status": "rigged_working_export_pending",
   "canvas": [
     1024,
     1536
@@ -80,8 +80,8 @@
     },
     {
       "path": "docs/avatar-materials/esi02-source-work/rinne-el-assembly-prototype.cmo3",
-      "bytes": 8721262,
-      "sha256": "87c4664a15c4554977ff7faa72456ab209be996ed286596522e6d1da317a0dc2"
+      "bytes": 14267817,
+      "sha256": "e896687f7fbf5a71a9f20d0e54e97da7117daac4adc6f887462f45071b638705"
     },
     {
       "path": "docs/avatar-materials/esi02-source-work/rinne-el-assembly-prototype.psd",
@@ -92,6 +92,11 @@
       "path": "docs/avatar-materials/esi02-source-work/rinne-el-head-separation-prototype.psd",
       "bytes": 25166180,
       "sha256": "e98c97b422262b0b1172989e855e38ed7bb788e9e9996014a07fe6ac8a54d290"
+    },
+    {
+      "path": "docs/avatar-materials/esi02-source-work/rinne-el-rigged-working.cmo3",
+      "bytes": 14267817,
+      "sha256": "e896687f7fbf5a71a9f20d0e54e97da7117daac4adc6f887462f45071b638705"
     },
     {
       "path": "docs/avatar-materials/esi02-source-work/rinne-el-source-prototype.cmo3",

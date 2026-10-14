@@ -35,3 +35,11 @@ Cubism Editor 5.3.04 FREE版でこのPSDを取り込み、`rinne-el-source-proto
 Cubism制作で必要なパラメータと受け渡し条件は [親フォルダーの制作手順](../README.md) を参照してください。
 
 組み立てCMO3には左右の目の配置・向き修正と、`ParamEyeLOpen` / `ParamEyeROpen` の開閉端での不透明度キーを追加しました。Editor上で両目の開眼と閉眼を確認しています。髪のみ・肌のみの追加素材は `hair-separated-prototype.png` と `face-skin-separated-prototype.png`、格納PSDは `rinne-el-head-separation-prototype.psd`。まだ組み立てに登録しておらず、位置・寸法の調整が必要です。口のメッシュとリギング、連続したまぶたの変形、頭・身体・髪の動き、MOC3は制作中です。
+
+## リギングの作業保存
+
+`rinne-el-rigged-working.cmo3` はEditorで保存・検証された現在の組み立てデータの別名コピーです。髪と肌を独立したArtMeshへ登録し、古い頭・参照用画像・閉じた口の不要なArtMeshを組み立てから取り除きました。原PNG・PSD・最初の原画保存用CMO3は保持しています。
+
+現在の表示部品は9個。左右の開いた目と閉じた目の不透明度キー、`ParamMouthOpenY` の連続した縦縮小、`ParamBreath` の100〜100.8%の変形、`ParamAngleZ` の首の位置を軸にした±4度、`ParamAngleX/Y` の小さい追従移動、`ParamBodyAngleX` の±0.75度、髪と輪の独立した回転を設定しました。頭のX/Yは小さい移動で、遠近を伴う大きな顔向きの作画を完成したものではありません。
+
+物理演算はEditorで「Head Input」「Hair (Short)」を用い、`ParamHairFront` と `ParamHairSide`（輪）への出力を登録。9部品を2048×2048のテクスチャ1枚へ自動配置し、未配置一覧が空になることを確認しました。出力先SDKは4.2。保存後検証はSUCCESS。MOC3書き出し操作でEditorのイベント処理が応答しなくなり、保存済みプロジェクトから再試行中です。真正なMOC3・ESI統合・Windows実機確認が成功するまでは完成版と扱いません。
