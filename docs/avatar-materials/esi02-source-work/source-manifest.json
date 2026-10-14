@@ -19,6 +19,11 @@
       "sha256": "28cf7347c76eefb83c2727353cb9558a7e4baeb0a99952823cc35ae095acdd66"
     },
     {
+      "path": "docs/avatar-materials/esi02-source-work/brows-separated.png",
+      "bytes": 468115,
+      "sha256": "767efc8436a3f431ac71491f61af2e27746bb6aefaa97531b7455475258df9fa"
+    },
+    {
       "path": "docs/avatar-materials/esi02-source-work/closed-mouth-prototype.png",
       "bytes": 390603,
       "sha256": "8a8284581dd2e409498d720915bb26194885a08cd400a11d7f4cc828af52f979"
@@ -89,6 +94,11 @@
       "sha256": "bd5225288e4c1e9842de4b66cd443b64ed0adf384b8adf83678087ee1461cc09"
     },
     {
+      "path": "docs/avatar-materials/esi02-source-work/rinne-el-brows-separated.psd",
+      "bytes": 25166188,
+      "sha256": "2bca351086dbd94e35c536100c27d370d9c256c4f688b832fa9ebd563b49748f"
+    },
+    {
       "path": "docs/avatar-materials/esi02-source-work/rinne-el-hands-correction.psd",
       "bytes": 18874626,
       "sha256": "a430bd5d6086a1dad64739361a072b996cc3ae2368048b17e98eef21565ef90a"
@@ -100,8 +110,8 @@
     },
     {
       "path": "docs/avatar-materials/esi02-source-work/rinne-el-rigged-working.cmo3",
-      "bytes": 13379296,
-      "sha256": "c23203f4e1742109ad7bf433f4b8cd221c862652b2d40901e21d6162ac40a029"
+      "bytes": 14070728,
+      "sha256": "86cdb5c3b29412f345d7edf15e7f22b0cda057d5801ecd1c9045d7b420854e3a"
     },
     {
       "path": "docs/avatar-materials/esi02-source-work/rinne-el-source-prototype.cmo3",
@@ -119,6 +129,8 @@
       "sha256": "d163ec402cea37c6f3224e33959e1da5ed600ded6dae958ed07bd8ac51d7f9de"
     }
   ],
-  "patch": "five_fingers_symmetric_open_closed_eyes_neck_behind_collar",
-  "saved_source_reexport_identical": true
+  "patch": "separate_collar_face_brows_registered_open_closed_eyes",
+  "saved_source_reexport_identical": true,
+  "drawable_count": 12,
+  "brow_provenance": "Image editing from the original reference; placement and thickness adjusted in Cubism; right brow mirrors the left"
 }

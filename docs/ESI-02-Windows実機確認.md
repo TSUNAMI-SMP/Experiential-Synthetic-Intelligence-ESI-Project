@@ -6,19 +6,35 @@
 
 最新版はGitHubの [esi-02-development ブランチ](https://github.com/TSUNAMI-SMP/Experiential-Synthetic-Intelligence-ESI-Project/tree/esi-02-development)です。`main` はESI-01のまま維持しています。完成版のZIP・リリースはまだ生成していません。
 
-Git for Windowsが使える場合、確認用フォルダーを置きたい場所でPowerShellを開き、次を実行します。既存のESI-01を上書きせず、新しい `ESI-02-check` を作ります。
+ZIPで導入する場合は [GitHubの開発ブランチZIP](https://github.com/TSUNAMI-SMP/Experiential-Synthetic-Intelligence-ESI-Project/archive/refs/heads/esi-02-development.zip) をダウンロードして展開します。新規導入では展開したフォルダー内の「ESI-02の初回準備・更新.cmd」を使います。
+
+Git for Windowsで導入する場合、確認用フォルダーを置きたい場所でPowerShellを開き、次を実行します。既存のESI-01を上書きせず、新しい `ESI-02-check` を作ります。
 
 ```powershell
 git clone --branch esi-02-development --single-branch https://github.com/TSUNAMI-SMP/Experiential-Synthetic-Intelligence-ESI-Project.git .\ESI-02-check
 ```
 
-Gitがない場合は先にGit for Windowsの導入が必要です。対話や開発の説明はこのクラウドチャットに残したまま進めます。開発履歴は検証済みの `ESI-02-recovery-latest.bundle` にも保存しています。
+ZIPによる導入にはGitは不要です。対話や開発の説明はこのクラウドチャットに残したまま進めます。開発履歴は検証済みの `ESI-02-recovery-latest.bundle` にも保存しています。
 
 すでにESI-01用の `models` フォルダーを持っている場合は、確認用フォルダーにもコピーして再利用できます。AIデータの指定版が違う場合は、準備画面が知らせます。使用中のESI-01と、以前手動で起動した言語ソフトは閉じてから確認を始めます。AivisSpeechは開いておき、凛音エルを登録します。
 
 ## 開発版の修正を取り込む
 
-実行中のAIデータの準備は完了まで続けてください。その後、会話を保存してESI-02を終了し、確認用フォルダーでPowerShellを開いて更新します。
+実行中のAIデータの準備は完了まで続けてください。その後、会話を保存してESI-02を終了します。
+
+### ZIPで導入した場合
+
+`fatal: not a git repository` はZIPにGitの管理情報が含まれないため表示されます。更新は次の手順です。
+
+1. [GitHubの開発ブランチZIP](https://github.com/TSUNAMI-SMP/Experiential-Synthetic-Intelligence-ESI-Project/archive/refs/heads/esi-02-development.zip) をダウンロードし、現在のESI-02とは別の場所へ展開します。
+2. 現在のフォルダーの `src`・`scripts`・`docs` を念のため別の場所へコピーして保管します。
+3. ZIP内の `src`・`scripts`・`docs` を現在のESI-02フォルダーへコピーし、同名ファイルを上書きします。`src/src` のように二重に入れず、現在の3フォルダーへ内容を重ねます。
+4. `models`・`data`・`.venv-esi02` はそのまま保持します。AIデータやセーブを含むフォルダー全体を交換する必要はありません。
+5. 現在のフォルダーの **「ESI-02を起動.cmd」** で再起動します。今回のモデル表示修正では初回準備やAIデータの再ダウンロードは不要です。
+
+### git cloneで導入した場合
+
+確認用フォルダーでPowerShellを開いて更新します。
 
 ```powershell
 git pull --ff-only origin esi-02-development

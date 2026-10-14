@@ -140,6 +140,10 @@
 	"ParameterGroups": [],
 	"Parts": [
 		{
+			"Id": "Part2",
+			"Name": "rinne-el-original-brows.psd"
+		},
+		{
 			"Id": "Part",
 			"Name": "rinne-el-head-separation-prototype.psd"
 		}

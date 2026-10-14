@@ -6,26 +6,31 @@
     2048,
     2048
   ],
-  "drawable_count": 9,
+  "drawable_count": 12,
   "source_project": "docs/avatar-materials/esi02-source-work/rinne-el-rigged-working.cmo3",
   "native_geometry_checked": true,
   "windows_hardware_checked": false,
   "physical_audio_checked": false,
   "files": [
     {
+      "path": "README.md",
+      "bytes": 2307,
+      "sha256": "82f0aac81decd64c75efe7c61230184f022a34b82a9524c64ed37e705870afe5"
+    },
+    {
       "path": "rinne-el.2048/texture_00.png",
-      "bytes": 1300497,
-      "sha256": "ab71fb50e42cac11db4b939078ddc465baa7fde386399be97a6d9cef927233d3"
+      "bytes": 1021133,
+      "sha256": "0be7883c51db182f69018ad2406b67f52615dea0fb530540a18a6bd921d8de25"
     },
     {
       "path": "rinne-el.cdi3.json",
-      "bytes": 2201,
-      "sha256": "4e1bc03a1650a8cd3706aa5d3b0b0b868ccdbe7ccc5c032753d08a5e643b8895"
+      "bytes": 2269,
+      "sha256": "411fd10ccf39fb71dd735d1e76ac3fbc87dfdd67874323bdaf157a75b49e6aec"
     },
     {
       "path": "rinne-el.moc3",
-      "bytes": 30336,
-      "sha256": "5bd61d954eb29ebd4d12528c31c05d042cef920a5b2e4b61feb5e7aea65a6aa5"
+      "bytes": 31360,
+      "sha256": "b5902b5b12301fc99c14685af848c8824d4c7d0697732620bf78429009ff2c3a"
     },
     {
       "path": "rinne-el.model3.json",
@@ -45,8 +50,16 @@
     "right": 5
   },
   "blink_rendering": "discrete_open_closed_in_esi02",
-  "neck_draw_order": 450,
+  "neck_draw_order": 600,
   "body_draw_order": 500,
   "source_reexport_identical": true,
-  "windows_startup_reported": true
+  "windows_startup_reported": true,
+  "collar_draw_order": 650,
+  "hair_draw_order": 900,
+  "brow_draw_order": 950,
+  "independent_brows": true,
+  "blink_meshes_stationary": true,
+  "visible_closed_eye_width_checked": true,
+  "blink_reopening_pixels_identical": true,
+  "comparison_report": "docs/avatar-materials/esi02-face-comparison/comparison.json"
 }

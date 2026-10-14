@@ -51,8 +51,29 @@ def test_native_bundled_character_has_real_deformation_and_transparent_rendering
     )
     assert result.returncode == 0, result.stdout + result.stderr
     report = json.loads((tmp_path / "native/geometry.json").read_text())
-    assert len(report["phases"]) == 13
+    assert len(report["phases"]) == 15
     assert report["physical_audio_verified"] is False
+
+
+@pytest.mark.integration
+def test_native_face_reopens_identically_and_closed_lashes_do_not_grow(tmp_path):
+    if not importlib.util.find_spec("live2d"):
+        pytest.skip("live2d-py is required")
+    if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
+        pytest.skip("An X11 rendering display is required")
+    root = Path(__file__).resolve().parents[1]
+    platform = "windows" if os.name == "nt" else "cocoa" if sys.platform == "darwin" else "xcb"
+    result = subprocess.run(
+        [sys.executable, "-X", "faulthandler", str(root / "scripts/validate-rinne-face.py"),
+         "--output", str(tmp_path / "face")],
+        env={**os.environ, "QT_QPA_PLATFORM": platform},
+        capture_output=True, text=True, timeout=25,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads((tmp_path / "face/comparison.json").read_text())
+    assert report["open_reopened_pixels_identical"]
+    assert report["all_meshes_stationary_during_blink"]
+    assert report["frame_sha256"][0] == report["frame_sha256"][2]
 
 
 @pytest.mark.integration

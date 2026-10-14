@@ -22,12 +22,14 @@ DEFAULTS = {
 DRAWABLES = {
     "Body_base", "Halo", "Eye_viewer_left_open", "Eye_viewer_right_open",
     "Eye_viewer_left_closed", "Eye_viewer_right_closed", "Mouth_open",
-    "Face_skin_separate", "Hair_separate",
+    "Face_skin_separate", "Hair_separate", "Collar_front",
+    "Brow_viewer_left", "Brow_viewer_right",
 }
 PHASES = [
     ("default", None, 0), ("mouth", "ParamMouthOpenY", 1),
     ("left_blink", "ParamEyeLOpen", 0), ("right_blink", "ParamEyeROpen", 0),
     ("left_mid_blink", "ParamEyeLOpen", 0.5), ("right_mid_blink", "ParamEyeROpen", 0.5),
+    ("both_closed", "ParamEyeLOpen", 0), ("reopened", None, 0),
     ("horizontal", "ParamAngleX", 30), ("vertical", "ParamAngleY", 30),
     ("tilt", "ParamAngleZ", 30), ("breath", "ParamBreath", 1),
     ("body", "ParamBodyAngleX", 10), ("hair", "ParamHairFront", 1),
@@ -98,6 +100,15 @@ def verify(model_path, output):
                 closed_axis = (closed_left[:, 0] + closed_right[:, 0]) / 2
                 assert np.allclose(closed_axis, closed_axis[0], atol=1e-6, rtol=0), "Closed eyes/brows are not mirrored"
                 assert abs(closed_axis[0] - mirror_axis[0]) < 0.005, "Blink drawings are off the face center"
+                for side in ("left", "right"):
+                    opened = vertices[f"Eye_viewer_{side}_open"]
+                    closed = vertices[f"Eye_viewer_{side}_closed"]
+                    assert np.ptp(closed[:, 0]) <= np.ptp(opened[:, 0]), "Closed eye is wider than the open eye"
+                    assert abs(closed[:, 0].mean() - opened[:, 0].mean()) < 0.01, "Blink is off its eye centre"
+                    assert opened[:, 1].min() <= closed[:, 1].mean() <= opened[:, 1].max(), "Blink is outside its eye height"
+                brow_left, brow_right = vertices["Brow_viewer_left"], vertices["Brow_viewer_right"]
+                assert np.allclose(brow_left[:, 1], brow_right[:, 1], atol=1e-6, rtol=0), "Brows have different heights"
+                assert np.allclose((brow_left[:, 0] + brow_right[:, 0]) / 2, mirror_axis[0], atol=1e-6, rtol=0), "Brows are off the eye mirror axis"
                 assert frame.pixelColor(0, 0).alpha() == 0, "Background is opaque"
                 assert any(frame.pixelColor(x, y).alpha() for x in range(0, frame.width(), 10)
                            for y in range(0, frame.height(), 10)), "Character did not render"
@@ -105,15 +116,17 @@ def verify(model_path, output):
                 name for name in identifiers
                 if not np.allclose(vertices[name], baseline["vertices"][name], atol=1e-7, rtol=0)
             }
-            if phase != "default":
+            if phase not in {"default", "reopened"}:
                 assert digest != baseline["digest"], f"{phase} did not change the rendered image"
+            if phase == "reopened":
+                assert not changed and digest == baseline["digest"], "Reopening did not restore the original face"
             if phase in {"mouth", "hair", "halo"}:
                 assert changed == {dict(mouth="Mouth_open", hair="Hair_separate", halo="Halo")[phase]}
             if phase in {"horizontal", "vertical", "tilt"}:
-                assert changed == DRAWABLES - {"Body_base"}, f"{phase} changed the wrong layers"
+                assert changed == DRAWABLES - {"Body_base", "Collar_front"}, f"{phase} changed the wrong layers"
             if phase in {"breath", "body"}:
                 assert changed == DRAWABLES, f"{phase} has no deformation or an unparented layer"
-            if phase in {"left_blink", "right_blink", "left_mid_blink", "right_mid_blink"}:
+            if phase in {"left_blink", "right_blink", "left_mid_blink", "right_mid_blink", "both_closed"}:
                 assert not changed, "Opacity-based blink moved the meshes"
                 if "mid" in phase:
                     assert digest == baseline[phase.replace("mid_", "")], "Mid-blink mixed the two eye drawings"
@@ -126,6 +139,8 @@ def verify(model_path, output):
                 canvas.pose = dict(DEFAULTS)
                 if next_parameter:
                     canvas.pose[next_parameter] = value
+                if PHASES[len(results)][0] == "both_closed":
+                    canvas.pose["ParamEyeROpen"] = 0
                 canvas.update()
                 QTimer.singleShot(180, sample)
             else:

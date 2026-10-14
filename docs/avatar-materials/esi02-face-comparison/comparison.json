@@ -1,0 +1,20 @@
+{
+  "renderer": "native live2d-py; same camera and fixed pose for all three frames",
+  "open_reopened_pixels_identical": true,
+  "all_meshes_stationary_during_blink": true,
+  "visible_lash_width_pixels": {
+    "left": {
+      "open": 68,
+      "closed": 62
+    },
+    "right": {
+      "open": 77,
+      "closed": 62
+    }
+  },
+  "frame_sha256": [
+    "f5687c86a3836a50d2ad6a0fc9bf1df0f2283b4f758c9cf95b5c1ba886c73273",
+    "006e5a231f3c473b6115d4672785bc7086c1a270e4959bba09ff5965210e642f",
+    "f5687c86a3836a50d2ad6a0fc9bf1df0f2283b4f758c9cf95b5c1ba886c73273"
+  ]
+}
