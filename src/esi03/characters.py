@@ -1,5 +1,6 @@
 """Independent character saves, sharing service/model files rather than GPU allocations."""
 
+import sqlite3
 from pathlib import Path
 
 from esi.models import uid
@@ -38,7 +39,7 @@ class Characters:
                     )
                 finally:
                     reader.close()
-            except (OSError, ValueError):
+            except (OSError, ValueError, sqlite3.Error):
                 continue
         return result
 

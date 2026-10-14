@@ -2,11 +2,30 @@
 
 import json
 import re
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from esi.models import uid, utc
 from esi02.knowledge import Knowledge
 from esi02.memory import Candidate, normalize, validate_citation
 from esi02.motivation import clip
+
+
+class SavedBelief(BaseModel):
+    model_config = ConfigDict(extra="allow", strict=True, allow_inf_nan=False)
+    id: str = Field(min_length=1, max_length=64)
+    kind: Literal["knowledge"]
+    key: str = Field(min_length=1, max_length=80)
+    label: str = Field(min_length=1, max_length=60)
+    value: str = Field(min_length=1, max_length=120)
+    confidence: float = Field(ge=0, le=1)
+    trust: Literal["confirmed", "user_reported", "inferred"]
+    status: Literal["active", "superseded", "deleted"]
+    quote: str = Field(max_length=500)
+    epoch: int = Field(ge=0)
+    conflicted: bool
+    evidence: list[dict] = Field(max_length=32)
 
 
 class Beliefs(Knowledge):
@@ -262,11 +281,7 @@ class Beliefs(Knowledge):
         old = next((item for item in self.entries() if item["id"] == memory_id), None)
         if old is None:
             raise ValueError("信念はすでに更新されています。")
-        super().delete(memory_id, epoch)
         with self.store.lock, self.store.db:
-            # Delete alternatives too: a deleted belief must not resurrect through an old source.
-            for item in self.entries(include_old=True):
-                if item["key"] == old["key"]:
-                    item["status"] = "deleted"
-                    self._put(item)
-                    self._history(item, "本人が知識を削除", "ui:" + uid())
+            for item in self.alternatives(old["key"]):
+                self._history({**item, "status": "deleted"}, "本人が知識を削除", "ui:" + uid())
+            super().delete(memory_id, epoch)

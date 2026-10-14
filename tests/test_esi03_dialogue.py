@@ -94,6 +94,34 @@ def test_initial_personality_and_goals_are_actual_saved_state(tmp_path):
         session.close()
 
 
+def test_followup_interest_obeys_interval_in_ordinary_conversation(tmp_path):
+    session = Session(tmp_path / "save.db")
+    try:
+        session.advance_world(30)
+        interest = session.experience.state.interests[0]
+        plan = Plan(opening="うん。", reflection="", refs=[], question="interest", interest_id=interest.id)
+        result = reply(PlannedDialogue(plan), session, "今日は外を歩いてきた")
+        assert result["asked_interest"] == interest.id
+        session.dialogue_result(next(reversed(session.turns)), result)
+        repeated = reply(PlannedDialogue(plan), session, "それから帰ってきた")
+        assert repeated["asked_interest"] is None
+        assert interest.question not in repeated["text"]
+    finally:
+        session.close()
+
+
+def test_self_goal_rest_and_basic_goodbye_do_not_become_external_topics(tmp_path):
+    session = Session(tmp_path / "save.db")
+    try:
+        llm = DialogueLLM(Settings(natural_dialogue=False))
+        session.world.body.fatigue = 0.8
+        session.experience.advance(session.world, 0)
+        assert "休んで" in reply(llm, session, "何がしたい？")["text"]
+        assert "おやすみ" in reply(llm, session, "おやすみ")["text"]
+    finally:
+        session.close()
+
+
 @pytest.mark.parametrize(
     "text",
     [
@@ -105,3 +133,14 @@ def test_initial_personality_and_goals_are_actual_saved_state(tmp_path):
 )
 def test_discourse_channel_rejects_ungrounded_assertions(text):
     assert discourse(text) == ""
+
+
+def test_many_short_sentences_fit_audio_backpressure_without_losing_text():
+    settings = Settings(speech_capacity=2)
+    llm = DialogueLLM(settings)
+    spoken, shown = [], []
+    answer = "うん。" * 15
+    result = llm._emit_answer(answer, Cancellation(), shown.append, spoken.append)
+    assert len(spoken) <= 2
+    assert "".join(spoken) == answer
+    assert result["text"] == answer

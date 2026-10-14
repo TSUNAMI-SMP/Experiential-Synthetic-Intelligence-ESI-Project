@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Literal
 
 from esi.models import uid
-from esi.storage import Store
 from esi02.knowledge import teaching_candidates
 from esi02.memory import Memory, explicit_candidates
 from esi02.motivation import State as MotivationState
@@ -18,12 +17,13 @@ from esi02.session import TERMINAL
 from esi02.session import SavedState as PreviousSavedState
 from esi02.session import Session as PreviousSession
 from esi02.world import World
-from esi03.beliefs import Beliefs
+from esi03.beliefs import Beliefs, SavedBelief
 from esi03.config import Settings
 from esi03.experience import Experience
 from esi03.motivation import Brain
 from esi03.personality import Character, Preferences
 from esi03.personality import State as ExperienceState
+from esi03.storage import Store, atomic
 
 
 class SavedState(PreviousSavedState):
@@ -59,6 +59,20 @@ def inspect_database(path):
             raise ValueError("ESI-03の保存状態がありません。")
         validate_state(json.loads(live[0]))
         validate_state(json.loads(snapshot[0]))
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "esi03_beliefs" in tables:
+            active = set()
+            for (payload,) in db.execute("SELECT payload FROM esi03_beliefs"):
+                belief = SavedBelief.model_validate_json(payload)
+                if belief.status == "active":
+                    if belief.key in active:
+                        raise ValueError("同じ対象の現在の信念が重複しています。")
+                    active.add(belief.key)
+        if "esi03_tool_jobs" in tables:
+            from esi03.research import Request
+
+            for (payload,) in db.execute("SELECT payload FROM esi03_tool_jobs"):
+                Request.model_validate_json(payload)
         return settings
     finally:
         db.close()
@@ -99,11 +113,16 @@ class Session(PreviousSession):
                 "CREATE TABLE IF NOT EXISTS esi03_evidence (id TEXT PRIMARY KEY, payload TEXT NOT NULL)"
             )
             self.store.db.commit()
+            from esi03.research import Research
+
+            self.research = Research(self)
             self.experience.seen_outcome = lambda identifier: (
                 self.store.db.execute("SELECT 1 FROM esi03_outcomes WHERE id=?", (identifier,)).fetchone()
                 is not None
             )
             self.world.conversation_active = False
+            self.experience.advance(self.world, 0)
+            self.brain.refresh(self.world, 0)
             self.experience.recover()
             if self.brain.active and self.brain.active.kind.startswith("ask_"):
                 self.brain.restart(self.world)
@@ -132,6 +151,29 @@ class Session(PreviousSession):
             "experience": self.experience.state.model_dump(),
         }
 
+    def restore(self, snapshot):
+        state = validate_state(snapshot)
+        seen = self.experience.seen_outcome
+        self.elapsed, self.epoch = state.elapsed, state.epoch
+        self.turns = OrderedDict((turn.id, turn.model_dump()) for turn in state.turns)
+        self.world = state.world
+        self.experience = Experience(state.experience.model_dump())
+        self.experience.seen_outcome = seen
+        self.brain = Brain(self.agent_id, self.world, self.experience, state.motivation.model_dump())
+        self.knowledge.character = self.experience.state.character
+        for memory in (self.memory, self.knowledge):
+            memory.revision = self.store.meta(memory.REVISION) or 0
+            memory.history_floor = self.store.meta(memory.HISTORY_FLOOR) or 0
+        if hasattr(self, "research"):
+            from esi03.tools import Policy
+
+            self.research.policy_revision = self.store.meta("esi03_tool_policy_revision") or 0
+            try:
+                self.research.policy = Policy.model_validate(self.store.meta("esi03_tool_policy") or {})
+            except ValueError:
+                self.research.policy = Policy(web_enabled=False)
+            self.tool_policy = self.research.policy
+
     def _write(self, events=()):
         value = self.dump()
         validate_state(value)
@@ -158,6 +200,7 @@ class Session(PreviousSession):
     def _record_motivation(self, events):
         self._write([(event["kind"], event["payload"]) for event in events])
 
+    @atomic
     def create_turn(self, text, source="text", observation_id=None, remember=True):
         # Exclusion is established before any contact, reward or belief handling.
         if not remember:
@@ -200,6 +243,7 @@ class Session(PreviousSession):
         except ValueError as exc:
             self.status["memory_error"] = str(exc)
 
+    @atomic
     def advance_world(self, seconds, conversing=False, autonomy=False, allow_requests=False):
         with self.lock:
             self.world.conversation_active = bool(conversing)
@@ -222,6 +266,7 @@ class Session(PreviousSession):
                 + [(event["kind"], event["payload"]) for event in events]
             )
 
+    @atomic
     def world_operation(self, operation, values=None):
         with self.lock:
             events = self._apply_world_command(operation, values)
@@ -231,6 +276,7 @@ class Session(PreviousSession):
                 + [(event["kind"], event["payload"]) for event in events]
             )
 
+    @atomic
     def motivation_operation(self, operation, values):
         with self.lock:
             events = self._motivation_operation(operation, values)
@@ -239,6 +285,7 @@ class Session(PreviousSession):
                 + [(event["kind"], event["payload"]) for event in events]
             )
 
+    @atomic
     def memory_operation(self, operation, data=None):
         with self.lock:
             super().memory_operation(operation, data)
@@ -251,6 +298,7 @@ class Session(PreviousSession):
             )
             self._write()
 
+    @atomic
     def character_operation(self, operation, data):
         with self.lock:
             if operation == "preferences":
@@ -284,14 +332,55 @@ class Session(PreviousSession):
         with self.lock:
             context = super().dialogue_context(query)
             character = self.experience.context()
-            if (
-                not self.experience.state.preferences.proactive
-                or self.world.elapsed < self.experience.state.preferences.quiet_until
-            ):
-                character["interests"] = []
+            state = self.experience.state
+            can_ask = (
+                state.preferences.proactive
+                and self.world.elapsed >= state.preferences.quiet_until
+                and (
+                    state.last_question is None
+                    or state.elapsed - state.last_question >= state.preferences.min_question_interval
+                )
+                and self.world.body.energy >= 0.45
+                and self.world.body.fatigue <= 0.65
+            )
+            character["allow_followup"] = can_ask
+            character["askable_interests"] = [
+                item.model_dump()
+                for item in state.interests
+                if can_ask
+                and item.next_at <= state.elapsed
+                and item.attempts < 3
+                and item.stage in {"open", "paused"}
+            ][:4]
             context.update(knowledge_policy="experience_only_v2", character=character)
             return context
 
+    @atomic
+    def change_runtime_settings(self, values):
+        if self.status.get("running"):
+            raise RuntimeError("言語・音声の実行設定は停止中に変更してください。")
+        settings = Settings.model_validate(values)
+        if settings.flash_attention == "off" and settings.cache_type != "f16":
+            raise ValueError("量子化KVキャッシュにはFlashAttentionをAUTOまたはONにしてください。")
+        previous = self.settings
+        self.settings = settings
+        try:
+            self.store.set_meta("esi03_settings", settings.model_dump())
+            self.experience.trace(
+                "runtime_settings",
+                "本人が言語・音声の実行設定を変更",
+                "ui:" + uid(),
+                flash_attention=settings.flash_attention,
+                cache_type=settings.cache_type,
+                asr_compute_type=settings.asr_compute_type,
+                context_tokens=settings.context_tokens,
+            )
+            self._write()
+        except Exception:
+            self.settings = previous
+            raise
+
+    @atomic
     def dialogue_result(self, turn_id, result):
         with self.lock:
             turn = self.turns[turn_id]
@@ -312,6 +401,15 @@ class Session(PreviousSession):
                 if any(item.id == identifier for item in self.experience.state.interests):
                     self.experience.asked(identifier, "chat:" + turn_id)
                     self.experience.finish_question("chat:" + turn_id, "unknown", turn_id)
+            elif result.get("asked_followup"):
+                self.experience.state.last_question = self.experience.state.elapsed
+                self.experience.state.questions += 1
+                self.experience.trace(
+                    "question",
+                    "本人の体験で気になったことを尋ねた",
+                    turn_id,
+                    reason="共有してくれた体験を、もう少し知りたい",
+                )
             turn.update(experience_processed=True, grounding=result.get("grounding", {}))
             self._persist(turn)
 
@@ -331,4 +429,9 @@ class Session(PreviousSession):
                     "conflicts": sum(bool(item.get("conflicted")) for item in self.knowledge.entries()),
                 },
             )
+            view["tools"] = {
+                "policy": self.research.policy.model_dump(),
+                "jobs": [request.model_dump() for request in self.research.entries()],
+                "usage": self.store.meta("esi03_tool_usage"),
+            }
             return view

@@ -14,13 +14,14 @@ class Experience:
         self.state = State.model_validate(state) if state is not None else State()
         self.seen_outcome = None
         if not self.state.interests:
-            self.interest(
+            initial = self.interest(
                 "覚えたことの確かめ方",
                 "覚えたことが合っているか、自分で確かめるにはどうしたらいい？",
                 "自分の学び方を育てたい",
                 "growth",
                 "initial:growth",
             )
+            initial.next_at = self.state.elapsed + 30
 
     def trace(self, kind, description, source_id, **details):
         state = self.state
@@ -42,6 +43,12 @@ class Experience:
             return None
         existing = next((i for i in self.state.interests if normalize(i.topic) == normalize(topic)), None)
         if existing:
+            if origin == "conflict" and existing.source_id != source_id:
+                existing.origin = "conflict"
+                existing.reason = reason[:240]
+                existing.question = question[:240]
+                existing.source_id = source_id[:128]
+                existing.attempts = 0
             if existing.source_id != source_id and existing.stage in {"resolved", "paused"}:
                 existing.stage = "open"
                 existing.reason = reason[:240]
@@ -107,7 +114,9 @@ class Experience:
             attachment=min(
                 state.preferences.max_attachment, traits.attachment_sensitivity * state.relationship * lonely
             ),
-            pleasure=clip(0.2 + 0.4 * novelty_gap + 0.2 * traits.playfulness),
+            pleasure=clip(
+                (0.2 + 0.4 * novelty_gap + 0.2 * traits.playfulness) * (1 - state.habits["play"].satiation)
+            ),
         )
         need, mod = state.needs, state.modulators
         alpha = 1 - math.exp(-seconds / 20)
@@ -210,7 +219,10 @@ class Experience:
         elif re.fullmatch(r"(?:今は|いまは)?(?:忙しい|話せない|話したくない|あとで|後で)[。！! ]*", text):
             state.preferences.quiet_until = state.elapsed + 900
             self.pause_question("後で話したいという相手の意思", turn["id"])
-        if re.search(r"(?:ありがとう|よくできた|よく出来た|よく頑張った|役に立った|助かった)", text):
+        if re.fullmatch(
+            r"(?:(?:教えて|話して|手伝って)くれて)?(?:ありがとう(?:ございます|ございました|ね)?|よく(?:できた|出来た|頑張った)(?:ね)?|役に立った(?:よ)?|助かった(?:よ|ね)?)[。！!\s]*",
+            text,
+        ):
             state.approval_balance = clip(state.approval_balance + 0.12)
             self.outcome(
                 "approval:" + turn["id"],
@@ -352,12 +364,22 @@ class Experience:
                 self.state.active_interest = None
             self.trace("question_result", "質問の結果を保存", source_id, interest_id=identifier, stage=stage)
 
-    def plan_research(self, tool="web_search", interest_id=None):
+    def plan_research(self, tool="web_search", interest_id=None, manual=False):
         state = self.state
         candidates = [
             i
             for i in state.interests
-            if i.stage in {"open", "paused"} and i.attempts < 3 and i.next_at <= state.elapsed
+            if (manual or i.stage in {"open", "paused"} and i.attempts < 3 and i.next_at <= state.elapsed)
+            and not any(
+                g.interest_id == i.id
+                and (
+                    g.stage in {"pending", "running"}
+                    or not manual
+                    and g.source_id == i.source_id
+                    and g.stage == "complete"
+                )
+                for g in state.goals
+            )
         ]
         item = (
             next((i for i in candidates if i.id == interest_id), None)
@@ -368,11 +390,17 @@ class Experience:
             g.interest_id == item.id and g.stage in {"pending", "running"} for g in state.goals
         ):
             return None
+        if not manual and any(
+            g.interest_id == item.id and g.source_id == item.source_id and g.stage == "complete"
+            for g in state.goals
+        ):
+            return None
         if len(state.goals) >= 64:
             state.goals = [g for g in state.goals if g.stage in {"pending", "running"}][-63:]
         goal = Goal(
             id=uid(),
             interest_id=item.id,
+            source_id=item.source_id,
             kind="verify" if item.origin == "conflict" else "learn",
             tool=tool,
             next_at=state.elapsed,

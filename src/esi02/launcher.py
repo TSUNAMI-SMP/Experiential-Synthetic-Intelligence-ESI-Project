@@ -62,10 +62,21 @@ def select_save(path, fallback, destination=None):
 
 
 class Launcher(QWidget):
+    data_directory = "esi02"
+    config_filename = "esi02-windows.toml"
+    window_title = "ESI-02を起動 — 開発中"
+    heading_text = "ESI-02  |  起動の準備"
+
+    def read_config(self, path):
+        return Settings.read(path)
+
+    def new_session(self, path, settings):
+        return Session(path, settings)
+
     def __init__(self, root, services_factory=Services, window_factory=Window):
         super().__init__()
         self.root = Path(root).resolve()
-        self.data = self.root / "data/esi02"
+        self.data = self.root / "data" / self.data_directory
         self.data.mkdir(parents=True, exist_ok=True)
         self.preferences_path = self.data / "launcher.json"
         self.preferences_error = ""
@@ -75,7 +86,7 @@ class Launcher(QWidget):
             self.preferences = Preferences()
             self.preferences_error = f"起動設定を読み込めません。元ファイルは保持しました：{exc}"
         self.save_path = Path(self.preferences.save_path or self.data / "session.sqlite3")
-        self.fallback = Settings.read(self.root / "config/esi02-windows.toml")
+        self.fallback = self.read_config(self.root / "config" / self.config_filename)
         self.messages = queue.Queue(maxsize=64)
         self.services = services_factory(self.root, self.preferences.model_dump(), self.notify)
         self.window_factory = window_factory
@@ -88,10 +99,10 @@ class Launcher(QWidget):
         self.window = None
         self.closing = False
         self.finished = False
-        self.setWindowTitle("ESI-02を起動 — 開発中")
+        self.setWindowTitle(self.window_title)
         self.resize(650, 330)
         layout = QVBoxLayout(self)
-        heading = QLabel("ESI-02  |  起動の準備")
+        heading = QLabel(self.heading_text)
         heading.setStyleSheet("font-size: 25px; color: #70dccc; font-weight: bold;")
         layout.addWidget(heading)
         self.save_label = QLabel()
@@ -277,7 +288,7 @@ class Launcher(QWidget):
         self.diagnostics_future = self.diagnostics_pool.submit(collect)
 
     def open_main(self, settings, offline=False):
-        session = Session(self.save_path, settings)
+        session = self.new_session(self.save_path, settings)
         try:
             backend = (
                 {"device": "unknown", "verified": False, "reason": "会話・音声の接続は未確認です。"}

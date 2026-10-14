@@ -113,3 +113,30 @@ def test_uncertain_audio_and_self_output_do_not_change_social_learning():
         )
     assert experience.state.last_user_epoch == 0
     assert experience.state.habits["conversation"].trials == 0
+
+
+def test_quoted_praise_is_language_data_not_social_approval():
+    experience = Experience()
+    experience.user_turn(
+        {"id": "example", "epoch": 1, "source": "text", "input": "ありがとうは丁寧な言葉です。"}
+    )
+    assert experience.state.habits["conversation"].trials == 0
+    assert experience.state.approval_balance == 0.45
+
+
+def test_pleasure_drive_can_choose_play_and_learn_from_world_outcome():
+    from esi03.motivation import Brain
+
+    world, experience = World(), Experience()
+    experience.state.needs.pleasure = 1
+    experience.state.needs.curiosity = 0.05
+    brain = Brain("character", world, experience)
+    choices = brain.candidates(world, allow_requests=False)
+    assert any(choice["kind"] == "explore" for choice in choices)
+    brain._begin(world, "explore", False)
+    assert brain.active.label == "部屋で気分転換を楽しむ"
+    for _ in range(16):
+        world.advance(1)
+        experience.advance(world, 1)
+        brain.tick(world, 1, False, False)
+    assert experience.state.habits["play"].trials == 1

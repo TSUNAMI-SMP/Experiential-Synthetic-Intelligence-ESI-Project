@@ -162,3 +162,51 @@ def test_outcome_ledger_survives_recent_cache_eviction(tmp_path):
         json.dumps(session.dump(), allow_nan=False)
     finally:
         session.close()
+
+
+def test_failed_transaction_rolls_back_beliefs_and_in_memory_core(tmp_path, monkeypatch):
+    session = Session(tmp_path / "character.db")
+    before = session.dump()
+    original = session._write
+
+    def fail(events=()):
+        original(events)
+        raise RuntimeError("injected save failure")
+
+    monkeypatch.setattr(session, "_write", fail)
+    with pytest.raises(RuntimeError):
+        session.create_turn("星砂村は月の国です。")
+    assert session.dump() == before
+    assert not session.knowledge.entries()
+    monkeypatch.setattr(session, "_write", original)
+    session.close()
+
+
+def test_process_loss_inside_learning_does_not_commit_half_a_turn(tmp_path):
+    import subprocess
+    import sys
+
+    path = tmp_path / "character.db"
+    session = Session(path)
+    session.close()
+    script = """
+import os, sys
+from esi03.session import Session
+session = Session(sys.argv[1])
+remember = session._remember
+def interrupted(turn):
+    remember(turn)
+    os._exit(17)
+session._remember = interrupted
+session.create_turn('星砂村は月の国です。ありがとう')
+"""
+    result = subprocess.run([sys.executable, "-c", script, str(path)], timeout=10)
+    assert result.returncode == 17
+    session = Session(path)
+    try:
+        assert not session.turns
+        assert not session.knowledge.entries()
+        assert session.experience.state.acquired_claims == 0
+        assert session.experience.state.habits["conversation"].trials == 0
+    finally:
+        session.close()

@@ -1,0 +1,13 @@
+release = "ESI-03"
+llm_device = "auto"
+asr_device = "auto"
+asr_model_path = "models/faster-whisper-small"
+playback = true
+reply_tokens = 384
+context_tokens = 4096
+cpu_threads = 2
+gpu_reserve_mb = 1536
+flash_attention = "auto"
+cache_type = "q8_0"
+asr_compute_type = "auto"
+natural_dialogue = true

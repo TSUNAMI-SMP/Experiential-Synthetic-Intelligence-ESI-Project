@@ -94,6 +94,7 @@ class Interest(Model):
 class Goal(Model):
     id: str = Field(min_length=1, max_length=64)
     interest_id: str = Field(min_length=1, max_length=64)
+    source_id: str = Field(default="", max_length=128)
     kind: Literal["learn", "verify", "grow"] = "learn"
     tool: Literal["web_search", "read_folder"] = "web_search"
     stage: Literal["pending", "running", "complete", "failed", "cancelled"] = "pending"
@@ -114,7 +115,7 @@ class Trace(Model):
 
 class Preferences(Model):
     proactive: bool = True
-    exploration: bool = False
+    exploration: bool = True
     speak_questions: bool = True
     min_question_interval: float = Field(default=150, ge=30, le=3600)
     daily_tool_budget: int = Field(default=12, ge=0, le=100)
@@ -155,10 +156,11 @@ class State(Model):
     meaningful_progress: Unit = 0.3
     acquired_claims: int = Field(default=0, ge=0)
     corrections: int = Field(default=0, ge=0)
-    verified_sources: int = Field(default=0, ge=0)
+    source_documents: int = Field(default=0, ge=0)
     questions: int = Field(default=0, ge=0)
     active_interest: str | None = Field(default=None, max_length=64)
     question_actions: dict[str, str] = Field(default_factory=dict, max_length=64)
+    body_action_modes: dict[str, Literal["play", "explore"]] = Field(default_factory=dict, max_length=64)
     last_user_epoch: int = Field(default=0, ge=0)
     recent_outcomes: list[str] = Field(default_factory=list, max_length=512)
     elapsed: Time = 0

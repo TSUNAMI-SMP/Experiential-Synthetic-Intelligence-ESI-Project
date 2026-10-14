@@ -190,11 +190,11 @@ def audio_check(selections):
     }
 
 
-def save_check(path):
+def save_check(path, inspector=None):
     if path is None or not Path(path).exists():
         return {"state": "not_created", "message": "セーブはまだありません。診断では作成しません。"}
     try:
-        inspect_database(path)
+        (inspector or inspect_database)(path)
         with sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True) as db:
             return {
                 "state": "valid",
@@ -242,12 +242,27 @@ def runtime_observation(status=None, backend=None, turns=None):
         "running": bool(status.get("running")),
         "llm": {
             k: backend[k]
-            for k in ("device", "verified", "source", "reason", "fallback_reason", "offloaded_layers", "inference_verified")
+            for k in (
+                "device",
+                "verified",
+                "source",
+                "reason",
+                "fallback_reason",
+                "offloaded_layers",
+                "inference_verified",
+            )
             if k in backend
         },
         "asr": {
             k: asr[k]
-            for k in ("device", "compute_type", "verified_inference", "fallback_reason", "attempts", "loaded_cuda_libraries")
+            for k in (
+                "device",
+                "compute_type",
+                "verified_inference",
+                "fallback_reason",
+                "attempts",
+                "loaded_cuda_libraries",
+            )
             if k in asr
         },
         "audio_input": {
@@ -261,8 +276,8 @@ def runtime_observation(status=None, backend=None, turns=None):
     }
 
 
-def llama_startup_logs(root):
-    directory = Path(root) / "data/esi02/logs"
+def llama_startup_logs(root, data_directory="esi02"):
+    directory = Path(root) / "data" / data_directory / "logs"
     candidates = list(directory.glob("llama-gpu-failed-*.log"))
     candidates.sort(key=lambda path: path.stat().st_mtime_ns, reverse=True)
     current = directory / "llama.log"
@@ -274,15 +289,23 @@ def llama_startup_logs(root):
             stream.seek(max(0, path.stat().st_size - 128_000))
             content = stream.read(128_000).decode("utf-8", errors="replace")
         # Startup placement/errors only: do not export requests, prompts or replies.
-        lines = [line[:500] for line in content.splitlines() if re.search(
-            r"load_tensors:.*(?:offload|buffer)|ggml_cuda_init:|CUDA error:|cuBLAS failed|cuDNN failed", line
-        )]
+        lines = [
+            line[:500]
+            for line in content.splitlines()
+            if re.search(
+                r"load_tensors:.*(?:offload|buffer)|ggml_cuda_init:|CUDA error:|cuBLAS failed|cuDNN failed",
+                line,
+            )
+        ]
         verbosity = re.search(r"verbosity\s*=\s*(\d+)", content)
-        reports.append({
-            "file": path.name, "verbosity": int(verbosity[1]) if verbosity else None,
-            "placement_records_found": any("offloaded" in line for line in lines),
-            "startup_records": lines[-12:],
-        })
+        reports.append(
+            {
+                "file": path.name,
+                "verbosity": int(verbosity[1]) if verbosity else None,
+                "placement_records_found": any("offloaded" in line for line in lines),
+                "startup_records": lines[-12:],
+            }
+        )
     return {"state": "checked" if reports else "not_found", "logs": reports}
 
 
@@ -295,6 +318,9 @@ def collect_report(
     executable=None,
     verify_models=False,
     check_services=True,
+    save_inspector=None,
+    data_directory="esi02",
+    desktop_filename="esi02-desktop.json",
 ):
     root = Path(root).resolve()
     report = {
@@ -320,7 +346,11 @@ def collect_report(
     }
     checks = report["checks"]
     try:
-        checks["llama_startup_logs"] = llama_startup_logs(root)
+        checks["llama_startup_logs"] = (
+            llama_startup_logs(root)
+            if data_directory == "esi02"
+            else llama_startup_logs(root, data_directory)
+        )
     except OSError as exc:
         checks["llama_startup_logs"] = problem(exc)
     try:
@@ -329,7 +359,7 @@ def collect_report(
         checks["audio"] = audio_check(selections)
     except Exception as exc:
         checks["audio"] = problem(exc)
-    checks["save"] = save_check(database)
+    checks["save"] = save_check(database) if save_inspector is None else save_check(database, save_inspector)
     checks["assets"] = asset_check(root, settings, verify_models)
     checks["packages"] = {}
     for name in PACKAGES:
@@ -364,7 +394,7 @@ def collect_report(
             else {"state": "not_checked", "message": "設定を読めないため、接続確認は行っていません。"}
         )
     try:
-        display = read_preferences(Path(database).parent / "esi02-desktop.json") if database else None
+        display = read_preferences(Path(database).parent / desktop_filename) if database else None
         checks["avatar"] = {
             "state": "selected" if display and display.model_path else "still_draft",
             "model_file_present": bool(

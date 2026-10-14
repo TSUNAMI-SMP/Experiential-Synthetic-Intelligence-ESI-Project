@@ -38,6 +38,21 @@ from esi02.session import Session
 
 class Window(QMainWindow):
     save_changed = Signal(str)
+    release_name = "ESI-02"
+    heading_text = "ESI-02  |  開発中・未完成"
+    window_title = "ESI-02 開発中 — 会話の動作確認"
+    desktop_filename = "esi02-desktop.json"
+
+    def new_runtime(self, *args):
+        return Runtime(*args)
+
+    def new_session(self, path):
+        return Session(path)
+
+    def validate_save(self, path):
+        from esi02.migration import validate_save
+
+        return validate_save(path)
 
     def __init__(self, session, backend=None, services=None):
         super().__init__()
@@ -61,12 +76,12 @@ class Window(QMainWindow):
             self.preferences = load_preferences(self.preferences_path)
         except (OSError, ValueError):
             self.preferences = {"input": None, "output": None, "microphone_on_start": True}
-        self.setWindowTitle("ESI-02 開発中 — 会話の動作確認")
+        self.setWindowTitle(self.window_title)
         self.resize(1000, 760)
         root = QWidget()
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
-        heading = QLabel("ESI-02  |  開発中・未完成")
+        heading = QLabel(self.heading_text)
         heading.setStyleSheet("font-size: 24px; color: #70dccc; font-weight: bold")
         layout.addWidget(heading)
         controls = QHBoxLayout()
@@ -262,7 +277,7 @@ class Window(QMainWindow):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
         self.timer.start(100)
-        self.desktop = DesktopViews(self, session.store.path.parent / "esi02-desktop.json")
+        self.desktop = DesktopViews(self, session.store.path.parent / self.desktop_filename)
         self.sync_desktop_checks()
         self.refresh_devices()
         self.refresh()
@@ -357,7 +372,7 @@ class Window(QMainWindow):
                     self.output_devices.currentData(),
                     self.on_start.isChecked(),
                 )
-                self.runtime = Runtime(self.session, input_id, output_id)
+                self.runtime = self.new_runtime(self.session, input_id, output_id)
                 self.runtime.start(microphone=self.on_start.isChecked() if microphone is None else microphone)
             except Exception as exc:
                 if self.runtime:
@@ -530,19 +545,17 @@ class Window(QMainWindow):
             self.request_accept.setEnabled(not request["response_observed"])
 
     def switch_save(self, path):
-        from esi02.migration import validate_save
-
         if self.preparation:
             raise RuntimeError("準備中です。終わるか中止してからセーブを選んでください。")
         if self.audio_test:
             raise RuntimeError("音のテストが終わってからセーブを開いてください。")
         path = Path(path)
-        result = validate_save(path)
-        if result["release"] != "ESI-02":
+        result = self.validate_save(path)
+        if result["release"] != self.release_name:
             raise ValueError("ESI-01は新しい名前のコピーへ移行して開いてください。")
         if path.samefile(self.session.store.path):
             return
-        candidate = Session(path)  # validate/restore before stopping the current working session
+        candidate = self.new_session(path)  # validate/restore before stopping the current working session
         if self.services:
             self.begin_preparation(candidate)
             return
@@ -561,7 +574,7 @@ class Window(QMainWindow):
         path = candidate.store.path
         # Preflight disk errors and allocate replacement views before closing the old save.
         self.session.checkpoint()
-        replacement = DesktopViews(self, path.parent / "esi02-desktop.json")
+        replacement = DesktopViews(self, path.parent / self.desktop_filename)
         try:
             self.session.store.close()
         except Exception:
