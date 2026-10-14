@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from esi.avatar import StillCanvas, probe_model, validate_model
 from esi.icons import icon
+from esi02.avatar_assets import bundled_model_path, model_file
 from esi02.desktop_preferences import read_preferences, write_preferences
 from esi02.live2d import AudioLiveCanvas
 from esi02.playback import PlaybackMeter
@@ -156,10 +157,10 @@ class MicrophoneButton(FloatingWindow):
 
 
 class AvatarWindow(FloatingWindow):
-    """Free-positioned still draft or a user-selected exported Cubism model."""
+    """Free-positioned bundled or custom Cubism model, with a still illustration."""
 
     def __init__(self):
-        super().__init__("ESI-02 凛音エル — 立ち絵・制作中")
+        super().__init__("ESI-02 凛音エル — 立ち絵")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -199,11 +200,12 @@ class AvatarWindow(FloatingWindow):
         self.hide_button.clicked.connect(self.hidden_requested)
         layout.addWidget(controls)
         self.setToolTip(
-            "ドラッグで自由に移動できます。現在は静止画です。Live2Dモデルは制作工程が残っています。"
+            "ドラッグで自由に移動できます。立ち絵を表示しています。"
         )
         self.set_width(300)
 
     def set_model(self, path):
+        path = model_file(path)
         path = validate_model(path) if path else None
         if path:
             probe_model(path)
@@ -218,14 +220,26 @@ class AvatarWindow(FloatingWindow):
         if path:
             replacement.problem.connect(self.model_failed)
         replacement.show()
-        self.setWindowTitle("ESI-02 アバター — " + ("Live2D" if path else "立ち絵・制作中"))
+        name = "凛音エル" if path == bundled_model_path() else "Live2D" if path else "立ち絵"
+        self.setWindowTitle("ESI-02 アバター — " + name)
         self.setToolTip(
             "ドラッグで自由に移動できます。"
-            + ("書き出し済みLive2Dモデルを表示します。" if path else "現在は静止画の下書きです。")
+            + ("Live2Dモデルを表示します。" if path else "立ち絵を表示しています。")
         )
 
     def model_failed(self, message):
+        failed = self.sender()
+        if failed is not self.canvas:
+            return
         self.problem = message
+        # Leave the GL callback before replacing its widget, and ignore errors
+        # from a previous canvas after the user has selected another model.
+        QTimer.singleShot(0, self, lambda: self.restore_still(failed, message))
+
+    def restore_still(self, failed, message):
+        if self.canvas is failed:
+            self.set_model(None)
+            self.problem = message
 
     def release(self):
         if isinstance(self.canvas, AudioLiveCanvas):

@@ -121,3 +121,60 @@ def test_missing_saved_model_keeps_settings_and_shows_still_with_error(app, mode
         assert "モデルを読み込めません" in restored.error.text()
     finally:
         dispose(restored, app)
+
+
+def test_fresh_profile_uses_portable_bundled_selection_and_explicit_still_survives_restart(
+    app, model, tmp_path, monkeypatch
+):
+    from esi.avatar import StillCanvas
+    from esi02.avatar_assets import BUNDLED_MODEL, bundled_model_path
+
+    _, Canvas = model
+    window = window_for(tmp_path, monkeypatch)
+    try:
+        assert isinstance(window.desktop.avatar.canvas, Canvas)
+        assert window.desktop.avatar.model_path == bundled_model_path()
+        assert window.desktop.preferences.model_path == BUNDLED_MODEL
+        window.bundled_model_button.click()
+        assert read_preferences(window.desktop.path).model_path == BUNDLED_MODEL
+        window.still_button.click()
+        assert isinstance(window.desktop.avatar.canvas, StillCanvas)
+        assert read_preferences(window.desktop.path).model_path is None
+    finally:
+        dispose(window, app)
+    restored = window_for(tmp_path, monkeypatch)
+    try:
+        assert isinstance(restored.desktop.avatar.canvas, StillCanvas)
+        restored.bundled_model_button.click()
+        assert isinstance(restored.desktop.avatar.canvas, Canvas)
+        assert read_preferences(restored.desktop.path).model_path == BUNDLED_MODEL
+    finally:
+        dispose(restored, app)
+
+
+def test_renderer_failure_restores_still_retains_choice_and_ignores_old_canvas_error(
+    app, model, tmp_path, monkeypatch
+):
+    from esi.avatar import StillCanvas
+    from esi02.avatar_assets import BUNDLED_MODEL
+
+    _, Canvas = model
+    window = window_for(tmp_path, monkeypatch)
+    try:
+        failed = window.desktop.avatar.canvas
+        failed.problem.emit("表示の初期化に失敗しました")
+        app.processEvents()
+        window.refresh()
+        assert failed.released and isinstance(window.desktop.avatar.canvas, StillCanvas)
+        assert window.desktop.preferences.model_path == BUNDLED_MODEL
+        assert "表示の初期化に失敗しました" in window.error.text()
+        window.reload_model()
+        previous = window.desktop.avatar.canvas
+        window.bundled_model_button.click()
+        current = window.desktop.avatar.canvas
+        previous.problem.emit("以前の表示の遅れたエラー")
+        app.processEvents()
+        assert current is window.desktop.avatar.canvas and isinstance(current, Canvas)
+        assert not window.desktop.avatar.problem
+    finally:
+        dispose(window, app)

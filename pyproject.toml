@@ -26,7 +26,11 @@ esi-desktop = "esi.desktop:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-esi = ["resources/*.png", "resources/icons/*.svg"]
+esi = [
+  "resources/*.png", "resources/icons/*.svg",
+  "resources/rinne-el/*.json", "resources/rinne-el/*.moc3",
+  "resources/rinne-el/rinne-el.2048/*.png",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

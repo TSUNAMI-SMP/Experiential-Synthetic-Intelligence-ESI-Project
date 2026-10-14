@@ -23,6 +23,7 @@ from pydantic import ValidationError
 from esi.adapters import TTS
 from esi.devices import audio_devices, identity, load_preferences, resolve_device, stream_format
 from esi02 import __version__
+from esi02.avatar_assets import model_file
 from esi02.config import Settings
 from esi02.desktop_preferences import read_preferences, write_json
 from esi02.gpu import llama_devices, nvidia_devices
@@ -335,7 +336,9 @@ def collect_report(
         display = read_preferences(Path(database).parent / "esi02-desktop.json") if database else None
         checks["avatar"] = {
             "state": "selected" if display and display.model_path else "still_draft",
-            "model_file_present": bool(display and display.model_path and Path(display.model_path).is_file()),
+            "model_file_present": bool(
+                display and display.model_path and model_file(display.model_path).is_file()
+            ),
             "render_tested": False,
         }
     except Exception as exc:

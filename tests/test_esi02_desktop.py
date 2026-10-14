@@ -26,6 +26,11 @@ def make_window(tmp_path, monkeypatch):
     from esi02 import gui
 
     monkeypatch.setattr(gui, "audio_devices", lambda: [])
+    # These control tests explicitly use a still preference; native rendering
+    # and the fresh-profile model choice have their own coverage.
+    display = tmp_path / "esi02-desktop.json"
+    if not display.exists():
+        write_preferences(display, DesktopPreferences(model_path=None))
     session = Session(tmp_path / "s.sqlite3", Settings(playback=False, tick_seconds=0.01))
     session.motivation_operation("enabled", False)
     window = gui.Window(session)

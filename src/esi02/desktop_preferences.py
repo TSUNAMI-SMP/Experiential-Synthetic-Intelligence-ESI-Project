@@ -8,6 +8,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from esi02.avatar_assets import BUNDLED_MODEL
+
 Coordinate = Annotated[int, Field(ge=-1_000_000, le=1_000_000)]
 Position = Annotated[list[Coordinate], Field(min_length=2, max_length=2)]
 
@@ -20,7 +22,9 @@ class DesktopPreferences(BaseModel):
     microphone_position: Position | None = None
     avatar_position: Position | None = None
     avatar_width: int = Field(default=300, ge=120, le=900)
-    model_path: str | None = Field(default=None, max_length=4096)
+    # An explicit saved null keeps the user's still-image choice. A new profile
+    # selects the bundled character without persisting an installation directory.
+    model_path: str | None = Field(default=BUNDLED_MODEL, max_length=4096)
 
 
 def read_preferences(path):

@@ -48,6 +48,13 @@ def test_report_reads_existing_save_without_changes_or_conversation_export(tmp_p
     assert report["checks"]["audio"]["formats"]["output"]["stream_opened"] is False
 
 
+def test_diagnostics_resolves_bundled_model_without_claiming_render_or_hardware_success(tmp_path, isolated):
+    report = diagnostics.collect_report(tmp_path, Settings(), tmp_path / "missing.sqlite3")
+    assert report["checks"]["avatar"]["model_file_present"] is True
+    assert report["checks"]["avatar"]["render_tested"] is False
+    assert not (tmp_path / "esi02-desktop.json").exists()
+
+
 def test_missing_save_is_not_created_and_corrupt_configuration_is_reported(tmp_path, isolated):
     missing = tmp_path / "missing.sqlite3"
     config = tmp_path / "bad.toml"

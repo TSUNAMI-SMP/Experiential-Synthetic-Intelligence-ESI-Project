@@ -1,5 +1,5 @@
 {
-  "status": "rigged_working_export_pending",
+  "status": "rigged_and_exported_native_checked_windows_pending",
   "canvas": [
     1024,
     1536
@@ -95,8 +95,8 @@
     },
     {
       "path": "docs/avatar-materials/esi02-source-work/rinne-el-rigged-working.cmo3",
-      "bytes": 14267817,
-      "sha256": "e896687f7fbf5a71a9f20d0e54e97da7117daac4adc6f887462f45071b638705"
+      "bytes": 11381276,
+      "sha256": "3ba3e7c0c5add4a462c29055e2446d475ca3d72ce2ced3318b83d275dc6d7f5b"
     },
     {
       "path": "docs/avatar-materials/esi02-source-work/rinne-el-source-prototype.cmo3",

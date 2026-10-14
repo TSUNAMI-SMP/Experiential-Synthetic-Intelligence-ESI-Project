@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 from esi.adapters import test_tone
 from esi.devices import audio_devices, identity, load_preferences, resolve_device, save_preferences
 from esi.icons import icon
+from esi02.avatar_assets import BUNDLED_MODEL
 from esi02.desktop import DesktopViews
 from esi02.preparation import PreparationResult, prepare_save, restore_services
 from esi02.presentation import BODY_SYMBOLS, activity
@@ -118,13 +119,17 @@ class Window(QMainWindow):
         self.model_label = QLabel()
         self.model_label.setWordWrap(True)
         model_controls.addWidget(self.model_label, 1)
+        self.bundled_model_button = QPushButton("凛音エル")
+        self.bundled_model_button.clicked.connect(lambda: self.set_model(BUNDLED_MODEL))
         self.choose_model_button = QPushButton("Live2Dモデルを選ぶ")
         self.choose_model_button.clicked.connect(self.choose_model)
         self.reload_model_button = QPushButton("モデルを再読込み")
         self.reload_model_button.clicked.connect(self.reload_model)
         self.still_button = QPushButton("立ち絵に戻す")
         self.still_button.clicked.connect(lambda: self.set_model(None))
-        for button in (self.choose_model_button, self.reload_model_button, self.still_button):
+        for button in (
+            self.bundled_model_button, self.choose_model_button, self.reload_model_button, self.still_button
+        ):
             model_controls.addWidget(button)
         layout.addLayout(model_controls)
         preparation_row = QHBoxLayout()
@@ -675,6 +680,7 @@ class Window(QMainWindow):
                 raise ValueError(self.desktop.problem)
             self.desktop.avatar.set_model(path)
             self.desktop.preferences.model_path = (
+                BUNDLED_MODEL if path == BUNDLED_MODEL else
                 str(self.desktop.avatar.model_path) if self.desktop.avatar.model_path else None
             )
             self.desktop.flush()
@@ -833,12 +839,15 @@ class Window(QMainWindow):
             self.conversation.verticalScrollBar().setValue(self.conversation.verticalScrollBar().maximum())
         model = self.desktop.avatar
         self.model_label.setText(
-            "Live2D：" + str(model.model_path)
+            "凛音エル（Live2D）"
+            if model.model_path and self.desktop.preferences.model_path == BUNDLED_MODEL
+            else "Live2D：" + str(model.model_path)
             if model.model_path
-            else "静止画の下書き。凛音エルの完成Live2Dは制作中です。"
+            else "立ち絵を表示しています。"
         )
         self.reload_model_button.setEnabled(bool(self.desktop.preferences.model_path) and not preparing)
         self.choose_model_button.setEnabled(not preparing)
+        self.bundled_model_button.setEnabled(not preparing)
         self.still_button.setEnabled(not preparing)
         problem = (
             status.get("error")
