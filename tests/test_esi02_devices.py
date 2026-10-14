@@ -37,7 +37,7 @@ def test_lazy_cuda_failure_during_transcription_retries_once_on_cpu(tmp_path, mo
             raise RuntimeError("cuDNN library unavailable while iterating segments")
         return ["real-segment-fixture"], "info-fixture"
 
-    monkeypatch.setattr(Perception, "_transcribe", transcribe)
+    monkeypatch.setattr(AcceleratedPerception, "_decode", transcribe)
     monkeypatch.setattr(Perception, "_create_model", lambda self: cpu)
     perception = AcceleratedPerception(Settings(), tmp_path, reported.append)
     perception.actual_device, perception.compute_type = "cuda", "int8_float16"
@@ -49,12 +49,10 @@ def test_lazy_cuda_failure_during_transcription_retries_once_on_cpu(tmp_path, mo
 
 
 def test_force_cuda_does_not_silently_change_experiment_to_cpu(tmp_path, monkeypatch):
-    from esi.audio import Perception
-
     def fail(self, audio):
         raise RuntimeError("intentional CUDA failure")
 
-    monkeypatch.setattr(Perception, "_transcribe", fail)
+    monkeypatch.setattr(AcceleratedPerception, "_decode", fail)
     perception = AcceleratedPerception(Settings(asr_device="cuda"), tmp_path)
     perception.actual_device = "cuda"
     with pytest.raises(RuntimeError, match="intentional"):

@@ -242,11 +242,13 @@ def runtime_observation(status=None, backend=None, turns=None):
         "running": bool(status.get("running")),
         "llm": {
             k: backend[k]
-            for k in ("device", "verified", "source", "reason", "fallback_reason")
+            for k in ("device", "verified", "source", "reason", "fallback_reason", "offloaded_layers", "inference_verified")
             if k in backend
         },
         "asr": {
-            k: asr[k] for k in ("device", "compute_type", "verified_inference", "fallback_reason") if k in asr
+            k: asr[k]
+            for k in ("device", "compute_type", "verified_inference", "fallback_reason", "attempts", "loaded_cuda_libraries")
+            if k in asr
         },
         "audio_input": {
             k: audio[k]
@@ -257,6 +259,31 @@ def runtime_observation(status=None, backend=None, turns=None):
         "completed_playback_chunks": sum(bool(c.get("played")) for c in chunks),
         "physical_sound_confirmed": False,
     }
+
+
+def llama_startup_logs(root):
+    directory = Path(root) / "data/esi02/logs"
+    candidates = list(directory.glob("llama-gpu-failed-*.log"))
+    candidates.sort(key=lambda path: path.stat().st_mtime_ns, reverse=True)
+    current = directory / "llama.log"
+    if current.is_file():
+        candidates.insert(0, current)
+    reports = []
+    for path in candidates[:3]:
+        with path.open("rb") as stream:
+            stream.seek(max(0, path.stat().st_size - 128_000))
+            content = stream.read(128_000).decode("utf-8", errors="replace")
+        # Startup placement/errors only: do not export requests, prompts or replies.
+        lines = [line[:500] for line in content.splitlines() if re.search(
+            r"load_tensors:.*(?:offload|buffer)|ggml_cuda_init:|CUDA error:|cuBLAS failed|cuDNN failed", line
+        )]
+        verbosity = re.search(r"verbosity\s*=\s*(\d+)", content)
+        reports.append({
+            "file": path.name, "verbosity": int(verbosity[1]) if verbosity else None,
+            "placement_records_found": any("offloaded" in line for line in lines),
+            "startup_records": lines[-12:],
+        })
+    return {"state": "checked" if reports else "not_found", "logs": reports}
 
 
 def collect_report(
@@ -292,6 +319,10 @@ def collect_report(
         "observations": observation or runtime_observation(),
     }
     checks = report["checks"]
+    try:
+        checks["llama_startup_logs"] = llama_startup_logs(root)
+    except OSError as exc:
+        checks["llama_startup_logs"] = problem(exc)
     try:
         if selections is None:
             selections = load_preferences(Path(database).parent / "audio-devices.json") if database else {}

@@ -6,6 +6,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import httpx
+
 from esi.desktop import Services as OriginalServices
 from esi02.gpu import Placement, confirmed_backend, llama_command, plan_llama
 
@@ -31,6 +33,7 @@ class Services(OriginalServices):
             backend.update(
                 device="unknown",
                 verified=False,
+                inference_verified=False,
                 reason="このセーブの言語ソフトの動作を現在確認できません。接続を確認し直してください。",
             )
         return backend
@@ -106,13 +109,38 @@ class Services(OriginalServices):
                     "reason": placement.reason,
                 }
                 if placement.layers and not self.backend["verified"]:
-                    raise RuntimeError("GPUへの読み込みを確認できませんでした。")
+                    raise RuntimeError("モデルは起動しましたが、起動ログでGPUへの読み込みを確認できませんでした。")
+                try:
+                    self._verify_inference(settings)
+                except (httpx.HTTPError, ValueError, TypeError) as exc:
+                    raise RuntimeError(f"言語ソフトの試験計算に失敗しました：{exc}") from exc
+                self.backend["inference_verified"] = True
                 self.language_signature = self.signature(settings)
                 return
             self.cancel.wait(0.25)
         raise RuntimeError(
             "起動を中止しました。" if self.cancel.is_set() else "言語ソフトの起動が時間切れになりました。"
         )
+
+    def _verify_inference(self, settings):
+        # A device listing and a ready HTTP server do not prove CUDA kernels work.
+        # This startup probe is never spoken or inserted into the user's memory.
+        with httpx.Client(base_url=settings.llm_url, trust_env=False, timeout=min(30, self.timeout)) as client:
+            response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": settings.llm_model,
+                    "messages": [{"role": "user", "content": "はい、とだけ答えてください。"}],
+                    "max_tokens": 4,
+                    "temperature": 0,
+                    "chat_template_kwargs": {"enable_thinking": False},
+                    "stream": False,
+                },
+            )
+            response.raise_for_status()
+            choices = response.json().get("choices", [])
+            if not choices or not choices[0].get("message", {}).get("content", "").strip():
+                raise RuntimeError("言語ソフトの試験計算が空の応答を返しました。")
 
     def ensure_engine(self, settings, kind):
         if kind != "llama":

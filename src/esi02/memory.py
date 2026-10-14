@@ -35,7 +35,7 @@ def grams(text):
 
 class Candidate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-    kind: Literal["fact", "preference", "topic"]
+    kind: Literal["fact", "preference", "topic", "knowledge"]
     key: str = Field(min_length=1, max_length=80)
     label: str = Field(min_length=1, max_length=60)
     value: str = Field(min_length=1, max_length=120)
@@ -106,12 +106,24 @@ def explicit_candidates(text):
 def validate_citation(turn, item):
     if item.quote not in turn["input"] or item.value not in item.quote:
         raise ValueError("本人の発言にない内容を記憶として登録できません。")
+    if item.kind in {"fact", "preference"} and re.search(r"[？?]", item.quote):
+        raise ValueError("質問を本人が明言した事実・好みとして登録できません。")
+    if item.kind == "fact" and item.key.startswith("fact:") and item.basis == "explicit" and not re.search(
+        r"私|僕|俺|わたし|ぼく|自分|わが|うち|家族|妹|姉|母|父|兄|弟|娘|息子|祖父|祖母", item.quote
+    ):
+        raise ValueError("本人についての発言と確認できません。外界の教示は教わった知識へ保存します。")
     if item.kind == "fact" and item.key not in LABELS and not item.key.startswith("fact:"):
         raise ValueError("事実の項目名が正しくありません。")
     if item.kind == "preference" and (not item.key.startswith("preference:") or item.label not in item.quote):
         raise ValueError("好みの対象を本人の発言で確認できません。")
     if item.kind == "topic" and not item.key.startswith("topic:"):
         raise ValueError("話題の項目が正しくありません。")
+    if item.kind == "knowledge" and (
+        item.key != "knowledge:" + normalize(item.label) or item.label not in item.quote
+    ):
+        raise ValueError("教わった知識の対象を元の発言で確認できません。")
+    if item.kind == "knowledge" and re.search(r"[？?]|例えば|たとえば|仮に|もし|という文|[「『\"]", item.quote):
+        raise ValueError("質問や架空の例を教わった事実として登録できません。")
     markers = {
         "name": r"名前|なまえ|名まえ|名は",
         "nickname": r"呼んで|呼び名|あだ名|ニックネーム",
@@ -129,41 +141,48 @@ def validate_citation(turn, item):
 
 
 class Memory:
+    TABLE = "esi02_memories"
+    PENDING = "esi02_memory_pending"
+    BLOCKED = "esi02_memory_blocked"
+    REVISION = "esi02_memory_revision"
+    HISTORY_FLOOR = "esi02_history_floor"
+    KINDS = {"fact", "preference", "topic"}
+
     CAPACITY = 1000
     PENDING_CAPACITY = 128
 
     def __init__(self, store):
         self.store = store
         with store.lock, store.db:
-            store.db.executescript("""
-                CREATE TABLE IF NOT EXISTS esi02_memories (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS esi02_memory_pending (turn_id TEXT PRIMARY KEY, payload TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS esi02_memory_blocked (turn_id TEXT PRIMARY KEY);
+            store.db.executescript(f"""
+                CREATE TABLE IF NOT EXISTS {self.TABLE} (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS {self.PENDING} (turn_id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS {self.BLOCKED} (turn_id TEXT PRIMARY KEY);
             """)
-        self.revision = store.meta("esi02_memory_revision") or 0
-        self.history_floor = store.meta("esi02_history_floor") or 0
+        self.revision = store.meta(self.REVISION) or 0
+        self.history_floor = store.meta(self.HISTORY_FLOOR) or 0
 
     def entries(self, include_old=False):
         with self.store.lock:
-            rows = self.store.db.execute("SELECT payload FROM esi02_memories ORDER BY rowid DESC")
+            rows = self.store.db.execute(f"SELECT payload FROM {self.TABLE} ORDER BY rowid DESC")
             items = [json.loads(r[0]) for r in rows]
             return items if include_old else [m for m in items if m["status"] == "active"]
 
     def _put(self, entry):
         self.store.db.execute(
-            "INSERT OR REPLACE INTO esi02_memories VALUES (?,?)",
+            f"INSERT OR REPLACE INTO {self.TABLE} VALUES (?,?)",
             (entry["id"], json.dumps(entry, ensure_ascii=False)),
         )
 
     def _revision(self, history_floor=None):
         self.revision += 1
-        updates = [("esi02_memory_revision", self.revision)]
+        updates = [(self.REVISION, self.revision)]
         if history_floor is not None:
             self.history_floor = max(self.history_floor, history_floor)
-            updates.append(("esi02_history_floor", self.history_floor))
+            updates.append((self.HISTORY_FLOOR, self.history_floor))
             for item in self.pending():
                 if item["epoch"] <= self.history_floor:
-                    self.store.db.execute("DELETE FROM esi02_memory_pending WHERE turn_id=?", (item["id"],))
+                    self.store.db.execute(f"DELETE FROM {self.PENDING} WHERE turn_id=?", (item["id"],))
         # Stay in the caller's transaction; Store.set_meta would commit an inner context early.
         self.store.db.executemany(
             "INSERT OR REPLACE INTO metadata VALUES (?,?)",
@@ -175,10 +194,10 @@ class Memory:
             return
         with self.store.lock, self.store.db:
             if self.store.db.execute(
-                "SELECT 1 FROM esi02_memory_blocked WHERE turn_id=?", (turn["id"],)
+                f"SELECT 1 FROM {self.BLOCKED} WHERE turn_id=?", (turn["id"],)
             ).fetchone():
                 return
-            count = self.store.db.execute("SELECT count(*) FROM esi02_memory_pending").fetchone()[0]
+            count = self.store.db.execute(f"SELECT count(*) FROM {self.PENDING}").fetchone()[0]
             if count >= self.PENDING_CAPACITY:
                 raise ValueError(
                     "記憶の整理待ちが128件あります。会話は保存されています。記憶画面で再整理できます。"
@@ -193,29 +212,29 @@ class Memory:
                 "error": None,
             }
             self.store.db.execute(
-                "INSERT OR IGNORE INTO esi02_memory_pending VALUES (?,?)",
+                f"INSERT OR IGNORE INTO {self.PENDING} VALUES (?,?)",
                 (turn["id"], json.dumps(request, ensure_ascii=False)),
             )
 
     def pending(self, eligible_only=False):
         with self.store.lock:
-            rows = self.store.db.execute("SELECT payload FROM esi02_memory_pending ORDER BY rowid DESC")
+            rows = self.store.db.execute(f"SELECT payload FROM {self.PENDING} ORDER BY rowid DESC")
             items = [json.loads(r[0]) for r in rows]
             return [m for m in items if m["attempts"] < 2] if eligible_only else items
 
     def finish(self, turn_id, error=None):
         with self.store.lock, self.store.db:
             if error is None:
-                self.store.db.execute("DELETE FROM esi02_memory_pending WHERE turn_id=?", (turn_id,))
+                self.store.db.execute(f"DELETE FROM {self.PENDING} WHERE turn_id=?", (turn_id,))
             else:
                 row = self.store.db.execute(
-                    "SELECT payload FROM esi02_memory_pending WHERE turn_id=?", (turn_id,)
+                    f"SELECT payload FROM {self.PENDING} WHERE turn_id=?", (turn_id,)
                 ).fetchone()
                 if row:
                     data = json.loads(row[0])
                     data.update(attempts=data["attempts"] + 1, error=str(error)[:300])
                     self.store.db.execute(
-                        "UPDATE esi02_memory_pending SET payload=? WHERE turn_id=?",
+                        f"UPDATE {self.PENDING} SET payload=? WHERE turn_id=?",
                         (json.dumps(data, ensure_ascii=False), turn_id),
                     )
 
@@ -224,7 +243,7 @@ class Memory:
             for item in self.pending():
                 item.update(attempts=0, error=None)
                 self.store.db.execute(
-                    "UPDATE esi02_memory_pending SET payload=? WHERE turn_id=?",
+                    f"UPDATE {self.PENDING} SET payload=? WHERE turn_id=?",
                     (json.dumps(item, ensure_ascii=False), item["id"]),
                 )
 
@@ -236,6 +255,8 @@ class Memory:
         if len(candidates) > 6:
             raise ValueError("一回の記憶整理は6項目以内です。")
         for item in candidates:
+            if item.kind not in self.KINDS:
+                raise ValueError("この種類の記憶は別の保存先を使ってください。")
             validate_citation(turn, item)
         with self.store.lock, self.store.db:
             if expected_revision is not None and self.revision != expected_revision:
@@ -243,7 +264,7 @@ class Memory:
             if turn["epoch"] <= self.history_floor:
                 return False
             if self.store.db.execute(
-                "SELECT 1 FROM esi02_memory_blocked WHERE turn_id=?", (turn["id"],)
+                f"SELECT 1 FROM {self.BLOCKED} WHERE turn_id=?", (turn["id"],)
             ).fetchone():
                 return False
             all_items = self.entries(include_old=True)
@@ -335,7 +356,7 @@ class Memory:
     def add_manual(self, kind, label, value, epoch):
         label, value = label.strip(), value.strip()
         if (
-            kind not in {"fact", "preference", "topic"}
+            kind not in self.KINDS
             or not label
             or len(label) > 60
             or not value
@@ -343,7 +364,7 @@ class Memory:
         ):
             raise ValueError("項目は1〜60文字、内容は1〜120文字で入力してください。")
         key = next((k for k, v in LABELS.items() if label == v), "manual:" + normalize(label))
-        if kind in {"preference", "topic"}:
+        if kind in {"preference", "topic", "knowledge"}:
             key = kind + ":" + normalize(label)
         with self.store.lock, self.store.db:
             items = self.entries(include_old=True)
@@ -383,13 +404,13 @@ class Memory:
             # Remove previous versions of the same field, and block deferred extraction of their sources.
             for item in items:
                 if item["key"] == entry["key"]:
-                    self.store.db.execute("DELETE FROM esi02_memories WHERE id=?", (item["id"],))
+                    self.store.db.execute(f"DELETE FROM {self.TABLE} WHERE id=?", (item["id"],))
                     if item["source_turn_id"]:
                         self.store.db.execute(
-                            "INSERT OR IGNORE INTO esi02_memory_blocked VALUES (?)", (item["source_turn_id"],)
+                            f"INSERT OR IGNORE INTO {self.BLOCKED} VALUES (?)", (item["source_turn_id"],)
                         )
                         self.store.db.execute(
-                            "DELETE FROM esi02_memory_pending WHERE turn_id=?", (item["source_turn_id"],)
+                            f"DELETE FROM {self.PENDING} WHERE turn_id=?", (item["source_turn_id"],)
                         )
             self._revision(history_floor=epoch)
 
@@ -420,6 +441,8 @@ class Memory:
             data = {
                 "id": item["id"],
                 "kind": item["kind"],
+                "key": item["key"],
+                "source_turn_id": item["source_turn_id"],
                 "label": item["label"],
                 "value": item["value"],
                 "trust": TRUST[item["trust"]],

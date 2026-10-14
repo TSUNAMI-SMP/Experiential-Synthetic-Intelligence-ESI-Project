@@ -1,3 +1,9 @@
+# 最新の原画に合わせたモデル（2026-10-15）
+
+`rinne-el-rigged-working.cmo3` が今回の保存済み編集元です。通常の顔・まつげ・眉・口・髪・輪は `src/esi/resources/rion-el.png` の画素を使います。`rinne-el-original-head.psd` はそのPNGを格納したPSD、`rinne-el-original-blink.psd` は閉眼の別作画、`rinne-el-original-style-closed-eyes.png` は閉眼のPNGです。両PSDの参照・表示層は独立したPSD読取り器で元PNGとの画素一致を確認しました。
+
+26部品の描画とまばたき前後を確認し、CMO3を開き直した再書き出しで実行用5ファイルがすべて一致しました。既存の5本指の胴体素材を保持します。手足の独立した動きや広い顔向きの遠近作画はありません。比較は [顔比較](../esi02-face-comparison/README.md)、実機は [Windows確認](../../ESI-02-Windows実機確認.md)。以下は以前の制作資料の記録です。
+
 # 凛音エルの編集元と制作素材
 
 現在の編集元は `rinne-el-rigged-working.cmo3` です。このフォルダーには以前の生成下書きや組み立て途中のファイルも制作履歴として保存しています。実行用モデルは `src/esi/resources/rinne-el/` に置いています。

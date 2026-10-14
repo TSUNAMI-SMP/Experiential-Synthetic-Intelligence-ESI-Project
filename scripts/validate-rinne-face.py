@@ -56,6 +56,30 @@ def compare(model_path, output):
                 assert all(np.array_equal(geometry[0][key], geometry[1][key]) for key in vertices), "Blink moved a layer"
                 changed = np.max(abs(frames[0].astype(int) - frames[1].astype(int)), axis=2) > 25
                 matrix = np.array(canvas.model.GetMvp()).reshape(4, 4, order="F")
+                left = vertices["Eye_viewer_left_open"]
+                right = vertices["Eye_viewer_right_open"]
+                # Original-pixel registration, inferred from the two eye crops.
+                # These checks catch atlas contamination and missing crown
+                # triangles that geometry-only and blink-width checks miss.
+                sx = (right[:, 0].mean() - left[:, 0].mean()) / (559 - 454.5)
+                sy = -np.ptp(left[:, 1]) / 44
+                origin = left.mean(axis=0) - np.array([454.5, 212]) * [sx, sy]
+
+                def source_pixels(points):
+                    world = origin + np.array(points) * [sx, sy]
+                    clip = np.column_stack([world, np.zeros(len(world)), np.ones(len(world))]) @ matrix.T
+                    return np.column_stack([(clip[:, 0] + 1) * frame.width() / 2,
+                                            (1 - clip[:, 1]) * frame.height() / 2])
+
+                landmarks = [(506, 72), (511, 76), (502, 80), (520, 82), (530, 70), (535, 75), (520, 62)]
+                for x, y in source_pixels(landmarks).round().astype(int):
+                    assert frames[0][y, x, 3] > 240, "Original crown has a transparent hole"
+                face_bounds = source_pixels([(450, 242), (559, 290)])
+                x0, y0 = np.floor(face_bounds.min(axis=0)).astype(int)
+                x1, y1 = np.ceil(face_bounds.max(axis=0)).astype(int)
+                face = frames[0][y0:y1 + 1, x0:x1 + 1]
+                yellow = (face[:, :, 0] > 180) & (face[:, :, 1] > 150) & (face[:, :, 2] < 130) & (face[:, :, 3] > 100)
+                assert np.count_nonzero(yellow) < 5, "Halo/atlas pixels leaked into the neutral face"
                 widths = {}
                 for side in ("left", "right"):
                     points = np.concatenate([vertices[f"Eye_viewer_{side}_{state}"] for state in ("open", "closed")])
@@ -83,6 +107,8 @@ def compare(model_path, output):
                     "renderer": "native live2d-py; same camera and fixed pose for all three frames",
                     "open_reopened_pixels_identical": True,
                     "all_meshes_stationary_during_blink": True,
+                    "neutral_face_atlas_contamination_checked": True,
+                    "original_crown_coverage_checked": True,
                     "visible_lash_width_pixels": widths,
                     "frame_sha256": [hashlib.sha256(a.tobytes()).hexdigest() for a in frames],
                 }

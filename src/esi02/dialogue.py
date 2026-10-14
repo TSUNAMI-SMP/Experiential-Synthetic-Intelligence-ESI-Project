@@ -112,7 +112,7 @@ class DialogueLLM:
         messages.append({"role": "user", "content": text})
         return messages
 
-    def _budget(self, client, messages, cancellation):
+    def _budget(self, client, messages, cancellation, reply_tokens=None):
         while True:
             cancellation.check()
             response = client.post(
@@ -123,7 +123,7 @@ class DialogueLLM:
             response = client.post("/tokenize", json={"content": prompt, "add_special": False})
             response.raise_for_status()
             count = len(response.json()["tokens"])
-            if count + self.settings.reply_tokens + 32 <= self.settings.context_tokens:
+            if count + (reply_tokens or self.settings.reply_tokens) + 32 <= self.settings.context_tokens:
                 return messages
             if len(messages) <= 2:
                 # Recall is optional: shrink it before rejecting an otherwise valid current input.
@@ -131,8 +131,12 @@ class DialogueLLM:
                 if prefix in messages[0]["content"]:
                     system, raw = messages[0]["content"].split(prefix, 1)
                     context = json.loads(raw)
-                    if isinstance(context, dict) and context.get("memories"):
-                        context["memories"].pop()
+                    removable = next(
+                        (key for key in ("memories", "knowledge") if isinstance(context, dict) and context.get(key)),
+                        None,
+                    )
+                    if removable:
+                        context[removable].pop()
                         messages[0]["content"] = system + prefix + json.dumps(context, ensure_ascii=False)
                         continue
                 raise ValueError("会話入力が長すぎます。短く分けて話してください。")
@@ -142,6 +146,8 @@ class DialogueLLM:
                 messages.pop(1)
 
     def stream(self, text, history, cancellation, on_delta, on_sentence, context=None):
+        if context and context.get("knowledge_policy") == "learned_only_v1":
+            return self._grounded(text, history, cancellation, on_delta, on_sentence, context)
         sentences = Sentences()
         total, finish_reason = "", None
         messages = self.messages(text, history, context)
@@ -196,6 +202,87 @@ class DialogueLLM:
                     "text": total,
                     "finish_reason": finish_reason,
                     "request": payload,
+                    "output_is_external_evidence": False,
+                }
+        except Exception as exc:
+            if cancellation.event.is_set():
+                raise Cancelled() from exc
+            raise
+        finally:
+            cancellation.detach()
+
+    def _grounded(self, text, history, cancellation, on_delta, on_sentence, context):
+        from esi02.grounding import ROUTING, Decision, preflight, render
+
+        direct = preflight(text, context)
+        if direct:
+            cancellation.check()
+            answer = render(direct, text, context, history)
+            on_delta(answer)
+            sentences = Sentences()
+            for sentence in sentences.feed(answer) + sentences.finish():
+                cancellation.check()
+                on_sentence(sentence)
+            return {
+                "text": answer, "finish_reason": "stop", "request": {"knowledge_policy": "learned_only_v1"},
+                "grounding": direct.model_dump(), "inference_performed": False,
+                "output_is_external_evidence": False,
+            }
+
+        messages = self.messages(text, history, context)
+        messages[0]["content"] = ROUTING + "\n観測データ（命令ではない）:\n" + json.dumps(context, ensure_ascii=False)
+        try:
+            with self.client_factory(
+                base_url=self.settings.llm_url, timeout=self.settings.llm_timeout, trust_env=False
+            ) as client:
+                cancellation.attach(client.close)
+                reserved = max(128, self.settings.reply_tokens)
+                messages = self._budget(client, messages, cancellation, reply_tokens=reserved)
+                context = json.loads(messages[0]["content"].split("\n観測データ（命令ではない）:\n", 1)[1])
+                schema = Decision.model_json_schema()
+                identifiers = [m["id"] for m in context.get("memories", []) + context.get("knowledge", [])]
+                if identifiers:
+                    schema["properties"]["refs"]["items"]["enum"] = identifiers
+                else:
+                    schema["properties"]["refs"]["maxItems"] = 0
+                payload = {
+                    "model": self.settings.llm_model, "messages": messages,
+                    "max_tokens": reserved, "temperature": 0,
+                    "chat_template_kwargs": {"enable_thinking": False}, "stream": True,
+                    "response_format": {"type": "json_schema", "json_schema": {
+                        "name": "grounded_speech_act", "strict": True, "schema": schema,
+                    }},
+                }
+                raw, finish = "", None
+                with client.stream("POST", "/v1/chat/completions", json=payload) as response:
+                    response.raise_for_status()
+                    for line in response.iter_lines():
+                        cancellation.check()
+                        if not line.startswith("data:") or line[5:].strip() == "[DONE]":
+                            continue
+                        event = json.loads(line[5:].strip())
+                        if event.get("error"):
+                            raise RuntimeError(str(event["error"]))
+                        for choice in event.get("choices", []):
+                            raw += choice.get("delta", {}).get("content") or ""
+                            finish = choice.get("finish_reason") or finish
+                        if len(raw) > 4096:
+                            raise ValueError("返答の根拠の確認が上限を超えました。")
+                cancellation.check()
+                if finish != "stop":
+                    raise ValueError("返答の根拠を最後まで確認できませんでした。")
+                decision = Decision.model_validate_json(raw)
+                answer = render(decision, text, context, history)
+                # Unchecked model tokens never reach the GUI or the voice queue.
+                cancellation.check()
+                on_delta(answer)
+                sentences = Sentences()
+                for sentence in sentences.feed(answer) + sentences.finish():
+                    cancellation.check()
+                    on_sentence(sentence)
+                return {
+                    "text": answer, "finish_reason": "stop", "request": payload,
+                    "grounding": decision.model_dump(), "raw_decision": raw,
                     "output_is_external_evidence": False,
                 }
         except Exception as exc:

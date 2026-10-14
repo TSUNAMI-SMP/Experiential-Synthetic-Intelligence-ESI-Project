@@ -116,3 +116,31 @@ def test_corrupt_session_contents_rejected_before_any_write(app, tmp_path, monke
         assert window.session is current and selected.read_bytes() == before
     finally:
         dispose(window, app)
+
+
+def test_taught_knowledge_editor_keeps_personal_memories_separate(app, tmp_path, monkeypatch):
+    from esi02 import gui
+    from esi02.memory_gui import MemoryDialog
+
+    monkeypatch.setattr(gui, "audio_devices", lambda: [])
+    session = Session(tmp_path / "learn.sqlite3", Settings(playback=False))
+    session.create_turn("私の名前は太郎です。")
+    session.create_turn("ルーメリアは月にある街です。")
+    window = gui.Window(session)
+    dialog = MemoryDialog(window)
+    try:
+        dialog.scope_choice.setCurrentIndex(1)
+        assert dialog.table.rowCount() == 1
+        assert dialog.table.item(0, 0).text() == "教わった知識"
+        dialog.table.selectRow(0)
+        dialog.value.setText("海にある街")
+        dialog.confirm.click()
+        assert session.knowledge.entries()[0]["value"] == "海にある街"
+        assert session.memory.entries()[0]["value"] == "太郎"
+        dialog.delete_button.click()
+        assert not session.knowledge.entries()
+        assert session.memory.entries()[0]["value"] == "太郎"
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        dispose(window, app)

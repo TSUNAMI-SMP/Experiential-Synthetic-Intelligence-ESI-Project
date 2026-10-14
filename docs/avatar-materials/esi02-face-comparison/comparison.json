@@ -2,19 +2,21 @@
   "renderer": "native live2d-py; same camera and fixed pose for all three frames",
   "open_reopened_pixels_identical": true,
   "all_meshes_stationary_during_blink": true,
+  "neutral_face_atlas_contamination_checked": true,
+  "original_crown_coverage_checked": true,
   "visible_lash_width_pixels": {
     "left": {
-      "open": 68,
-      "closed": 62
+      "open": 94,
+      "closed": 85
     },
     "right": {
-      "open": 77,
-      "closed": 62
+      "open": 89,
+      "closed": 84
     }
   },
   "frame_sha256": [
-    "f5687c86a3836a50d2ad6a0fc9bf1df0f2283b4f758c9cf95b5c1ba886c73273",
-    "006e5a231f3c473b6115d4672785bc7086c1a270e4959bba09ff5965210e642f",
-    "f5687c86a3836a50d2ad6a0fc9bf1df0f2283b4f758c9cf95b5c1ba886c73273"
+    "cc0315d2198679e9bb363d5cc0bd43c6b6c64a89e75d0941e081001532253713",
+    "ff03fc57bb7b6fad6ff9d794962ff9a0287e13b427816462232cd3015e2c6fec",
+    "cc0315d2198679e9bb363d5cc0bd43c6b6c64a89e75d0941e081001532253713"
   ]
 }

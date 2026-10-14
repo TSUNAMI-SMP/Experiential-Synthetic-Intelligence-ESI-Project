@@ -140,6 +140,14 @@
 	"ParameterGroups": [],
 	"Parts": [
 		{
+			"Id": "Part4",
+			"Name": "rinne-original-blink.psd"
+		},
+		{
+			"Id": "Part3",
+			"Name": "rinne-original-head-rebuild.psd"
+		},
+		{
 			"Id": "Part2",
 			"Name": "rinne-el-original-brows.psd"
 		},

@@ -6,7 +6,7 @@
     2048,
     2048
   ],
-  "drawable_count": 12,
+  "drawable_count": 26,
   "source_project": "docs/avatar-materials/esi02-source-work/rinne-el-rigged-working.cmo3",
   "native_geometry_checked": true,
   "windows_hardware_checked": false,
@@ -14,23 +14,23 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 2307,
-      "sha256": "82f0aac81decd64c75efe7c61230184f022a34b82a9524c64ed37e705870afe5"
+      "bytes": 2222,
+      "sha256": "d66538b252c8ceade81bdde92087a84c5a801692f2dd5065d57e9de04cb44a29"
     },
     {
       "path": "rinne-el.2048/texture_00.png",
-      "bytes": 1021133,
-      "sha256": "0be7883c51db182f69018ad2406b67f52615dea0fb530540a18a6bd921d8de25"
+      "bytes": 1717113,
+      "sha256": "125d68c47f88c36bd7a23e8f46cd4a3b83128ae1e1f838654250e248b1839cc5"
     },
     {
       "path": "rinne-el.cdi3.json",
-      "bytes": 2269,
-      "sha256": "411fd10ccf39fb71dd735d1e76ac3fbc87dfdd67874323bdaf157a75b49e6aec"
+      "bytes": 2406,
+      "sha256": "60f4fca54ba0bba5b4e1ddeff42907d790c8ecde85b0578a896c84b9196b32d8"
     },
     {
       "path": "rinne-el.moc3",
-      "bytes": 31360,
-      "sha256": "b5902b5b12301fc99c14685af848c8824d4c7d0697732620bf78429009ff2c3a"
+      "bytes": 37568,
+      "sha256": "eca57615a4a1a80c474a4b0042df6f8e0401ad9ecb8c7f6cd9e7418159562b7b"
     },
     {
       "path": "rinne-el.model3.json",
@@ -43,14 +43,14 @@
       "sha256": "850e794f22b70296d7c428ce550a704eb155c71187d3d3a2b1b2e4720de3002f"
     }
   ],
-  "normal_eye_brow_symmetry_checked": true,
-  "closed_eye_brow_symmetry_checked": true,
+  "normal_eye_brow_symmetry_checked": false,
+  "closed_eye_brow_symmetry_checked": false,
   "hand_digits_visual_checked": {
     "left": 5,
     "right": 5
   },
   "blink_rendering": "discrete_open_closed_in_esi02",
-  "neck_draw_order": 600,
+  "neck_draw_order": 590,
   "body_draw_order": 500,
   "source_reexport_identical": true,
   "windows_startup_reported": true,
@@ -61,5 +61,13 @@
   "blink_meshes_stationary": true,
   "visible_closed_eye_width_checked": true,
   "blink_reopening_pixels_identical": true,
-  "comparison_report": "docs/avatar-materials/esi02-face-comparison/comparison.json"
+  "comparison_report": "docs/avatar-materials/esi02-face-comparison/comparison.json",
+  "face_draw_order": 600,
+  "ear_draw_order": 610,
+  "back_hair_draw_order": 550,
+  "front_hair_draw_order": 900,
+  "original_neutral_pixels_used": true,
+  "original_neutral_shapes_preserved": true,
+  "neutral_face_atlas_contamination_checked": true,
+  "original_crown_coverage_checked": true
 }

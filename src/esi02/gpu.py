@@ -136,6 +136,12 @@ def llama_command(executable, model, settings, placement):
         "--reasoning",
         "off",
         "--jinja",
+        # Recent llama.cpp hides tensor placement at the default info level.
+        # Keep trace startup records so a loaded GPU is not mistaken for CPU.
+        "--log-verbosity",
+        "4",
+        "--log-colors",
+        "off",
     ]
     if placement.layers:
         command.extend(["--device", placement.device])
@@ -143,9 +149,10 @@ def llama_command(executable, model, settings, placement):
 
 
 def confirmed_backend(log, placement):
-    match = re.search(r"offloaded\s+(\d+)/(\d+)\s+layers\s+to\s+GPU", log, re.IGNORECASE)
-    if match and int(match.group(1)) > 0:
-        return {"device": "cuda", "offloaded_layers": int(match.group(1)), "verified": True}
+    plain = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", log)
+    matches = re.findall(r"offloaded\s+(\d+)\s*/\s*(\d+)\s+layers\s+to\s+GPU", plain, re.IGNORECASE)
+    if matches and int(matches[-1][0]) > 0:
+        return {"device": "cuda", "offloaded_layers": int(matches[-1][0]), "verified": True}
     if placement.layers == 0:
         return {"device": "cpu", "offloaded_layers": 0, "verified": True}
     return {"device": "unknown", "offloaded_layers": 0, "verified": False}

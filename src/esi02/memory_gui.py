@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 
 from esi02.memory import TRUST
 
-KINDS = {"fact": "事実・自己紹介", "preference": "好み", "topic": "未解決の話題"}
+KINDS = {"fact": "事実・自己紹介", "preference": "好み", "topic": "未解決の話題", "knowledge": "教わった知識"}
 STATES = {"active": "現在", "superseded": "訂正前", "resolved": "解決済み"}
 
 
@@ -35,6 +35,10 @@ class MemoryDialog(QDialog):
         explanation.setWordWrap(True)
         layout.addWidget(explanation)
         row = QHBoxLayout()
+        self.scope_choice = QComboBox()
+        self.scope_choice.addItem("本人の記憶", "personal")
+        self.scope_choice.addItem("教わった知識", "knowledge")
+        row.addWidget(self.scope_choice)
         self.query = QLineEdit()
         self.query.setPlaceholderText("名前・紅茶などを検索")
         self.query.textChanged.connect(self.refresh)
@@ -58,7 +62,8 @@ class MemoryDialog(QDialog):
         editor = QHBoxLayout()
         self.kind = QComboBox()
         for key, label in KINDS.items():
-            self.kind.addItem(label, key)
+            if key != "knowledge":
+                self.kind.addItem(label, key)
         editor.addWidget(self.kind)
         self.label = QLineEdit()
         self.label.setPlaceholderText("項目（例：名前）")
@@ -89,6 +94,7 @@ class MemoryDialog(QDialog):
         retry.clicked.connect(lambda: self.window.memory_action("retry", {}))
         row.addWidget(retry)
         layout.addLayout(row)
+        self.scope_choice.currentIndexChanged.connect(self.switch_scope)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
         self.timer.start(500)
@@ -96,7 +102,10 @@ class MemoryDialog(QDialog):
         self.select()
 
     def refresh(self):
-        memory = self.window.session.memory
+        memory = (
+            self.window.session.knowledge
+            if self.scope_choice.currentData() == "knowledge" else self.window.session.memory
+        )
         signature = (id(memory), memory.revision, self.query.text(), self.include_old.isChecked())
         if self.last_signature != signature:
             entries = memory.search(self.query.text(), self.include_old.isChecked(), limit=1000)
@@ -161,17 +170,29 @@ class MemoryDialog(QDialog):
     def edit(self, checked=False, resolved=False):
         if self.selected_id:
             self.window.memory_action(
-                "edit", {"id": self.selected_id, "value": self.value.text(), "resolved": resolved}
+                "edit", {"id": self.selected_id, "value": self.value.text(), "resolved": resolved,
+                         "scope": self.scope_choice.currentData()}
             )
             self.refresh()
 
     def delete(self):
         if self.selected_id:
-            self.window.memory_action("delete", {"id": self.selected_id})
+            self.window.memory_action("delete", {"id": self.selected_id, "scope": self.scope_choice.currentData()})
             self.refresh()
 
     def add(self):
         self.window.memory_action(
-            "add", {"kind": self.kind.currentData(), "label": self.label.text(), "value": self.value.text()}
+            "add", {"kind": self.kind.currentData(), "label": self.label.text(), "value": self.value.text(),
+                    "scope": self.scope_choice.currentData()}
         )
+        self.refresh()
+
+    def switch_scope(self):
+        self.selected_id = self.last_signature = None
+        self.kind.clear()
+        for key, label in KINDS.items():
+            if (key == "knowledge") == (self.scope_choice.currentData() == "knowledge"):
+                self.kind.addItem(label, key)
+        self.label.clear()
+        self.value.clear()
         self.refresh()

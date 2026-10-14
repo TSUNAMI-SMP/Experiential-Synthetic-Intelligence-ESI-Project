@@ -27,3 +27,25 @@ def initialize():
                 if directory.is_dir():
                     _handles.append(os.add_dll_directory(str(directory)))
     _initialized = True
+
+
+def loaded_paths():
+    """Observe DLLs already loaded by this process; do not load or replace them."""
+    if os.name != "nt":
+        return {}
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+    kernel.GetModuleHandleW.restype = wintypes.HMODULE
+    kernel.GetModuleFileNameW.argtypes = [wintypes.HMODULE, wintypes.LPWSTR, wintypes.DWORD]
+    kernel.GetModuleFileNameW.restype = wintypes.DWORD
+    result = {}
+    for name in ("cublas64_12.dll", "cublasLt64_12.dll", "cudnn64_9.dll", "cudart64_12.dll"):
+        handle = kernel.GetModuleHandleW(name)
+        if handle:
+            buffer = ctypes.create_unicode_buffer(32768)
+            if kernel.GetModuleFileNameW(handle, buffer, len(buffer)):
+                result[name] = buffer.value
+    return result

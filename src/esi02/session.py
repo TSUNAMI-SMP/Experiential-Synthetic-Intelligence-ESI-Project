@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from esi.models import uid, utc
 from esi.storage import Store
 from esi02.config import Settings
+from esi02.knowledge import Knowledge, teaching_candidates
 from esi02.memory import Memory, explicit_candidates
 from esi02.motivation import Brain
 from esi02.motivation import State as MotivationState
@@ -96,6 +97,7 @@ class Session:
         self.brain = Brain(self.agent_id, self.world)
         try:
             self.memory = Memory(self.store)
+            self.knowledge = Knowledge(self.store)
             saved = self.store.load_snapshot()
             if saved:
                 state = saved["state"]
@@ -189,6 +191,7 @@ class Session:
     def _remember(self, turn):
         try:
             self.memory.apply(turn, explicit_candidates(turn["input"]))
+            self.knowledge.apply(turn, teaching_candidates(turn["input"]))
             self.memory.queue(turn)
             turn["memory_queued"] = True
         except ValueError as exc:
@@ -214,13 +217,13 @@ class Session:
             history = []
             superseded = {
                 m["source_turn_id"]
-                for m in self.memory.entries(include_old=True)
+                for m in self.memory.entries(include_old=True) + self.knowledge.entries(include_old=True)
                 if m["status"] == "superseded"
             }
             for turn in self.turns.values():
                 if turn["id"] == before_id:
                     break
-                if turn["epoch"] <= self.memory.history_floor:
+                if turn["epoch"] <= max(self.memory.history_floor, self.knowledge.history_floor):
                     continue
                 if turn["id"] in superseded:
                     continue
@@ -240,8 +243,9 @@ class Session:
     def memory_operation(self, operation, data=None):
         data = data or {}
         with self.lock:
+            memory = self.knowledge if data.get("scope") == "knowledge" else self.memory
             if operation == "edit":
-                self.memory.edit(
+                memory.edit(
                     data["id"],
                     data["value"],
                     self.epoch,
@@ -249,11 +253,11 @@ class Session:
                     data.get("resolved", False),
                 )
             elif operation == "add":
-                self.memory.add_manual(data["kind"], data["label"], data["value"], self.epoch)
+                memory.add_manual(data["kind"], data["label"], data["value"], self.epoch)
             elif operation == "delete":
-                self.memory.delete(data["id"], self.epoch)
+                memory.delete(data["id"], self.epoch)
             elif operation == "retry":
-                self.memory.retry()
+                memory.retry()
             else:
                 raise ValueError("記憶の操作が正しくありません。")
             self.status["memory_error"] = ""
@@ -334,6 +338,11 @@ class Session:
 
     def dialogue_context(self, query):
         with self.lock:
+            policy = {
+                "knowledge_policy": "learned_only_v1",
+                "knowledge": self.knowledge.context(query),
+                "current_turn_id": next(reversed(self.turns), None),
+            }
             if not re.search(
                 r"仮想|部屋|温度|体|疲|調子|様子|状態|暑|寒|欲求|休|気分|気持ち|エネルギー|水分|脳|ホルモン|ドーパミン|行動|何を|なにを|temperature|tired|feel|mood",
                 query,
@@ -344,8 +353,12 @@ class Session:
                     # Detailed simulation telemetry is unnecessary for greetings, names or arithmetic.
                     # Retain the simulation flag and actual activity; answer state questions with full observations.
                     return {
+                        **policy,
                         "memories": self.memory.context(query),
-                        "virtual_world": {"simulation_only": True, "activity": self.world.body.activity},
+                        "virtual_world": {
+                            "simulation_only": True, "activity": self.world.body.activity,
+                            "body": {"energy": self.world.body.energy, "fatigue": self.world.body.fatigue},
+                        },
                         "motivation": {
                             "simulation_only": True,
                             "recent_requests": self.brain.recent_requests(self.world),
@@ -355,6 +368,7 @@ class Session:
                         },
                     }
             return {
+                **policy,
                 "memories": self.memory.context(query),
                 "virtual_world": self.world.context(),
                 "motivation": self.brain.context(self.world),

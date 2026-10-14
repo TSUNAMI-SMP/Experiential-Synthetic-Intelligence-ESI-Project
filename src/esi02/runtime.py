@@ -36,6 +36,7 @@ class Runtime:
         self.voice = deque()
         self.current = None
         self.microphone = None
+        self.pending_recognition = None
         self.thread = None
         self.llm = llm or DialogueLLM(self.settings)
         self.memory_llm = memory_llm or MemoryLLM(self.settings)
@@ -139,7 +140,21 @@ class Runtime:
         self._cancel_memory()
         self._cancel_request_voice()
         self._cancel_current("新しい会話入力")
-        turn = self.session.create_turn(text, source, observation.event_id if observation else None)
+        confirmation = None
+        uncertain = bool(observation and observation.metadata.get("recognition_needs_confirmation"))
+        if self.pending_recognition and not uncertain and text.strip("。！! \n") in {
+            "はい", "合っています", "合ってます", "あっています", "それで合っています", "その通りです",
+        }:
+            text, confirmation = self.pending_recognition
+            source = "confirmed_recognition"
+        self.pending_recognition = (text, observation.event_id) if uncertain and text.strip() else None
+        turn = self.session.create_turn(
+            text, source, confirmation or (observation.event_id if observation else None), remember=not uncertain
+        )
+        if uncertain:
+            self.session.update_turn(turn["id"], recognition_needs_confirmation=True)
+        if confirmation:
+            self.session.update_turn(turn["id"], recognition_confirmation_of=confirmation)
         self.current = {
             "turn_id": turn["id"],
             "cancellation": Cancellation(),
@@ -362,8 +377,14 @@ class Runtime:
                     if not job["cancellation"].event.is_set():
                         with self.session.lock:
                             applied = self.session.memory.apply(
-                                job["request"], result["items"], "Qwen3-4B", job["revision"]
+                                job["request"], [i for i in result["items"] if i["kind"] != "knowledge"],
+                                "Qwen3-4B", job["revision"]
                             )
+                            learned = self.session.knowledge.apply(
+                                job["request"], [i for i in result["items"] if i["kind"] == "knowledge"],
+                                "Qwen3-4B", job["knowledge_revision"]
+                            )
+                            applied = applied and learned
                             if applied:
                                 rejected = result.get("rejected", [])
                                 self.session.store.append(
@@ -444,7 +465,13 @@ class Runtime:
             self.session.update_turn(turn_id, stage="generating")
             self._status("phase", "generating")
             self._status("error", "")
-            if turn["input"].strip():
+            if turn.get("recognition_needs_confirmation") and turn["input"].strip():
+                text = f"「{turn['input'][:100]}」と聞こえました。合っていますか。違う場合は言い直すか、入力欄で直してください。"
+                self.session.update_turn(turn_id, reply=text, finish_reason="recognition_confirmation")
+                current["generation_done"] = True
+                current["sentences"] = 1
+                self.voice.append({"turn_id": turn_id, "index": 0, "text": text, "stop": current["voice_stop"]})
+            elif turn["input"].strip():
                 self._job(
                     "llm",
                     "reply",
@@ -513,7 +540,10 @@ class Runtime:
             return
         request = pending[0]
         cancellation = Cancellation()
-        existing = self.session.memory.search(request["input"], limit=12)
+        existing = (
+            self.session.memory.search(request["input"], limit=8)
+            + self.session.knowledge.search(request["input"], limit=4)
+        )
         self.memory_task = {"cancellation": cancellation}
         self._status("memory_phase", "organizing")
         self._status("memory_stream_started", "")
@@ -526,6 +556,7 @@ class Runtime:
             cancellation,
             request=request,
             revision=self.session.memory.revision,
+            knowledge_revision=self.session.knowledge.revision,
             cancellation=cancellation,
         )
 
