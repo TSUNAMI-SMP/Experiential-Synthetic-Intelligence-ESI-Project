@@ -1,0 +1,222 @@
+{
+  "model": "src/esi/resources/rinne-el/rinne-el.model3.json",
+  "physical_audio_verified": false,
+  "renderer": "live2d-py",
+  "phases": [
+    {
+      "phase": "default",
+      "changed": [],
+      "frame_changed": false
+    },
+    {
+      "phase": "mouth",
+      "changed": [
+        "Mouth_open"
+      ],
+      "frame_changed": true
+    },
+    {
+      "phase": "left_blink",
+      "changed": [],
+      "frame_changed": true
+    },
+    {
+      "phase": "right_blink",
+      "changed": [],
+      "frame_changed": true
+    },
+    {
+      "phase": "left_mid_blink",
+      "changed": [],
+      "frame_changed": true
+    },
+    {
+      "phase": "right_mid_blink",
+      "changed": [],
+      "frame_changed": true
+    },
+    {
+      "phase": "both_closed",
+      "changed": [],
+      "frame_changed": true
+    },
+    {
+      "phase": "reopened",
+      "changed": [],
+      "frame_changed": false
+    },
+    {
+      "phase": "horizontal",
+      "changed": [
+        "Brow_viewer_left",
+        "Brow_viewer_right",
+        "Ear_viewer_left",
+        "Ear_viewer_right",
+        "Eye_viewer_left_closed",
+        "Eye_viewer_left_open",
+        "Eye_viewer_right_closed",
+        "Eye_viewer_right_open",
+        "Face_skin_separate",
+        "Hair_back_left_lower",
+        "Hair_back_left_middle",
+        "Hair_back_left_upper",
+        "Hair_back_right_lower",
+        "Hair_back_right_middle",
+        "Hair_back_right_upper",
+        "Hair_front_bang_center",
+        "Hair_front_bang_left",
+        "Hair_front_crown",
+        "Hair_front_side_left",
+        "Hair_front_side_right",
+        "Halo",
+        "Mouth_clear_patch",
+        "Mouth_open",
+        "Neck_base_original"
+      ],
+      "frame_changed": true
+    },
+    {
+      "phase": "vertical",
+      "changed": [
+        "Brow_viewer_left",
+        "Brow_viewer_right",
+        "Ear_viewer_left",
+        "Ear_viewer_right",
+        "Eye_viewer_left_closed",
+        "Eye_viewer_left_open",
+        "Eye_viewer_right_closed",
+        "Eye_viewer_right_open",
+        "Face_skin_separate",
+        "Hair_back_left_lower",
+        "Hair_back_left_middle",
+        "Hair_back_left_upper",
+        "Hair_back_right_lower",
+        "Hair_back_right_middle",
+        "Hair_back_right_upper",
+        "Hair_front_bang_center",
+        "Hair_front_bang_left",
+        "Hair_front_crown",
+        "Hair_front_side_left",
+        "Hair_front_side_right",
+        "Halo",
+        "Mouth_clear_patch",
+        "Mouth_open",
+        "Neck_base_original"
+      ],
+      "frame_changed": true
+    },
+    {
+      "phase": "tilt",
+      "changed": [
+        "Brow_viewer_left",
+        "Brow_viewer_right",
+        "Ear_viewer_left",
+        "Ear_viewer_right",
+        "Eye_viewer_left_closed",
+        "Eye_viewer_left_open",
+        "Eye_viewer_right_closed",
+        "Eye_viewer_right_open",
+        "Face_skin_separate",
+        "Hair_back_left_lower",
+        "Hair_back_left_middle",
+        "Hair_back_left_upper",
+        "Hair_back_right_lower",
+        "Hair_back_right_middle",
+        "Hair_back_right_upper",
+        "Hair_front_bang_center",
+        "Hair_front_bang_left",
+        "Hair_front_crown",
+        "Hair_front_side_left",
+        "Hair_front_side_right",
+        "Halo",
+        "Mouth_clear_patch",
+        "Mouth_open",
+        "Neck_base_original"
+      ],
+      "frame_changed": true
+    },
+    {
+      "phase": "breath",
+      "changed": [
+        "Body_base",
+        "Brow_viewer_left",
+        "Brow_viewer_right",
+        "Collar_front",
+        "Ear_viewer_left",
+        "Ear_viewer_right",
+        "Eye_viewer_left_closed",
+        "Eye_viewer_left_open",
+        "Eye_viewer_right_closed",
+        "Eye_viewer_right_open",
+        "Face_skin_separate",
+        "Hair_back_left_lower",
+        "Hair_back_left_middle",
+        "Hair_back_left_upper",
+        "Hair_back_right_lower",
+        "Hair_back_right_middle",
+        "Hair_back_right_upper",
+        "Hair_front_bang_center",
+        "Hair_front_bang_left",
+        "Hair_front_crown",
+        "Hair_front_side_left",
+        "Hair_front_side_right",
+        "Halo",
+        "Mouth_clear_patch",
+        "Mouth_open",
+        "Neck_base_original"
+      ],
+      "frame_changed": true
+    },
+    {
+      "phase": "body",
+      "changed": [
+        "Body_base",
+        "Brow_viewer_left",
+        "Brow_viewer_right",
+        "Collar_front",
+        "Ear_viewer_left",
+        "Ear_viewer_right",
+        "Eye_viewer_left_closed",
+        "Eye_viewer_left_open",
+        "Eye_viewer_right_closed",
+        "Eye_viewer_right_open",
+        "Face_skin_separate",
+        "Hair_back_left_lower",
+        "Hair_back_left_middle",
+        "Hair_back_left_upper",
+        "Hair_back_right_lower",
+        "Hair_back_right_middle",
+        "Hair_back_right_upper",
+        "Hair_front_bang_center",
+        "Hair_front_bang_left",
+        "Hair_front_crown",
+        "Hair_front_side_left",
+        "Hair_front_side_right",
+        "Halo",
+        "Mouth_clear_patch",
+        "Mouth_open",
+        "Neck_base_original"
+      ],
+      "frame_changed": true
+    },
+    {
+      "phase": "hair",
+      "changed": [
+        "Hair_back_left_lower",
+        "Hair_back_left_middle",
+        "Hair_back_left_upper",
+        "Hair_back_right_lower",
+        "Hair_back_right_middle",
+        "Hair_back_right_upper"
+      ],
+      "frame_changed": true
+    },
+    {
+      "phase": "halo",
+      "changed": [
+        "Halo"
+      ],
+      "frame_changed": true
+    }
+  ]
+}

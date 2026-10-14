@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "esi"
-version = "0.2.1"
-description = "ESI-01: Experiential Synthetic Intelligence research runtime"
+version = "0.3.0"
+description = "ESI-03: experiential learning, personality and autonomous research runtime"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "numpy==2.5.4", "scipy==1.18.1", "pydantic==2.14.1", "PyYAML==6.0.3",
@@ -21,6 +21,7 @@ live2d = ["live2d-py==1.0.0", "PyOpenGL==3.1.10", "Pillow==12.3.0"]
 [project.scripts]
 esi = "esi.cli:main"
 esi-desktop = "esi.desktop:main"
+esi03 = "esi03.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

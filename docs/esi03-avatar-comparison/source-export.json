@@ -1,0 +1,26 @@
+{
+  "saved_source_reopened_and_export_identical": true,
+  "runtime_files": {
+    "rinne-el.2048/texture_00.png": {
+      "sha256": "125d68c47f88c36bd7a23e8f46cd4a3b83128ae1e1f838654250e248b1839cc5",
+      "bytes": 1717113
+    },
+    "rinne-el.cdi3.json": {
+      "sha256": "60f4fca54ba0bba5b4e1ddeff42907d790c8ecde85b0578a896c84b9196b32d8",
+      "bytes": 2406
+    },
+    "rinne-el.moc3": {
+      "sha256": "63ca328461b4927476904db4b709f0872c20584c5b4409a1e574366a749e3081",
+      "bytes": 38784
+    },
+    "rinne-el.model3.json": {
+      "sha256": "a4bf7be796b69f9dad5a3761f92eb6f53733940cd89f66c9e4a080b3778f3fb9",
+      "bytes": 428
+    },
+    "rinne-el.physics3.json": {
+      "sha256": "850e794f22b70296d7c428ce550a704eb155c71187d3d3a2b1b2e4720de3002f",
+      "bytes": 1997
+    }
+  },
+  "source_sha256": "f34ecb12d32da668b0f39ac136dda711de720699d09fe193d9df7d61a3e3b0ce"
+}

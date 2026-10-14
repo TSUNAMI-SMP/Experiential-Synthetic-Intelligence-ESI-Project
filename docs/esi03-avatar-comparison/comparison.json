@@ -1,0 +1,23 @@
+{
+  "renderer": "native live2d-py; same camera and fixed pose for all three frames",
+  "open_reopened_pixels_identical": true,
+  "all_meshes_stationary_during_blink": true,
+  "neutral_face_atlas_contamination_checked": true,
+  "original_crown_coverage_checked": true,
+  "original_hair_outline_landmarks_checked": 18,
+  "visible_lash_width_pixels": {
+    "left": {
+      "open": 94,
+      "closed": 85
+    },
+    "right": {
+      "open": 89,
+      "closed": 84
+    }
+  },
+  "frame_sha256": [
+    "5c88c72fdc4c4f993a9e4eb4199f902bb96a785a106549ae72a90e5a6c96e76f",
+    "f6fb280e811b8161cd91fff19b1fa18f9dafb96d8a7168e5d5da1d566ef69b29",
+    "5c88c72fdc4c4f993a9e4eb4199f902bb96a785a106549ae72a90e5a6c96e76f"
+  ]
+}

@@ -827,7 +827,7 @@ class Window(QMainWindow):
         for turn in view["turns"]:
             entries.append("あなた：" + (turn["input"] or "（聞き取りに失敗）"))
             if turn["reply"]:
-                entries.append("ESI-02：" + turn["reply"])
+                entries.append(self.release_name + "：" + turn["reply"])
             metrics = turn["metrics"]
             timing = (
                 f" / 文章の開始 {metrics['first_token_seconds']:.1f}秒"

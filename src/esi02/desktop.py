@@ -76,8 +76,8 @@ class MicrophoneButton(FloatingWindow):
     main_requested = Signal()
     reset_requested = Signal()
 
-    def __init__(self):
-        super().__init__("ESI-02 マイク")
+    def __init__(self, release_name="ESI-02"):
+        super().__init__(release_name + " マイク")
         self.setFixedSize(72, 72)
         self.setMask(QRegion(self.rect(), QRegion.Ellipse))
         self.setFocusPolicy(Qt.StrongFocus)
@@ -159,8 +159,9 @@ class MicrophoneButton(FloatingWindow):
 class AvatarWindow(FloatingWindow):
     """Free-positioned bundled or custom Cubism model, with a still illustration."""
 
-    def __init__(self):
-        super().__init__("ESI-02 凛音エル — 立ち絵")
+    def __init__(self, release_name="ESI-02"):
+        self.release_name = release_name
+        super().__init__(release_name + " 凛音エル — 立ち絵")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -221,7 +222,7 @@ class AvatarWindow(FloatingWindow):
             replacement.problem.connect(self.model_failed)
         replacement.show()
         name = "凛音エル" if path == bundled_model_path() else "Live2D" if path else "立ち絵"
-        self.setWindowTitle("ESI-02 アバター — " + name)
+        self.setWindowTitle(self.release_name + " アバター — " + name)
         self.setToolTip(
             "ドラッグで自由に移動できます。"
             + ("Live2Dモデルを表示します。" if path else "立ち絵を表示しています。")
@@ -286,8 +287,9 @@ class DesktopViews:
             self.preferences = DesktopPreferences()
             self.writable = False  # Keep the damaged/original file for diagnosis.
             self.problem = f"表示設定を読み込めません。元ファイルは保持しました：{exc}"
-        self.microphone = MicrophoneButton()
-        self.avatar = AvatarWindow()
+        release_name = getattr(main, "release_name", "ESI-02")
+        self.microphone = MicrophoneButton(release_name)
+        self.avatar = AvatarWindow(release_name)
         if self.preferences.model_path:
             try:
                 self.avatar.set_model(self.preferences.model_path)

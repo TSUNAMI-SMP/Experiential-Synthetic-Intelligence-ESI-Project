@@ -1,5 +1,5 @@
 {
-  "status": "original_neutral_rig_exported_native_checked_windows_retest_pending",
+  "status": "esi03_original_hair_contours_native_verified_windows_retest_pending",
   "canvas": [
     1024,
     1536
@@ -10,8 +10,8 @@
   "files": [
     {
       "path": "docs/avatar-materials/esi02-source-work/README.md",
-      "bytes": 12285,
-      "sha256": "84177f52af6af6accc7b95e9a0a41375d10fbb6dcf5cab4000998961b272e75e"
+      "bytes": 13165,
+      "sha256": "c34162aed34b497d31bf45dfa2eb3e6d0696a86c72f29c2ba2ee8df0963d7893"
     },
     {
       "path": "docs/avatar-materials/esi02-source-work/body-base-prototype.png",
@@ -130,8 +130,8 @@
     },
     {
       "path": "docs/avatar-materials/esi02-source-work/rinne-el-rigged-working.cmo3",
-      "bytes": 23189658,
-      "sha256": "d6fd63c771cc0b7e77794797825a51e627823dc12c9ca12f4fa9bdfff44ce9fd"
+      "bytes": 23192655,
+      "sha256": "f34ecb12d32da668b0f39ac136dda711de720699d09fe193d9df7d61a3e3b0ce"
     },
     {
       "path": "docs/avatar-materials/esi02-source-work/rinne-el-source-prototype.cmo3",
@@ -144,10 +144,10 @@
       "sha256": "908cdc83996f77ddda80456c701818bea70ca5a25b89357aeda7f47311feb1ba"
     }
   ],
-  "patch": "separate_collar_face_brows_registered_open_closed_eyes",
+  "patch": "original_neutral_face_and_ESI03_hair_contours",
   "saved_source_reexport_identical": true,
-  "drawable_count": 12,
-  "brow_provenance": "Image editing from the original reference; placement and thickness adjusted in Cubism; right brow mirrors the left",
+  "drawable_count": 26,
+  "brow_provenance": "Unmodified original-reference pixels; naturally different left and right drawings retained",
   "source_reexport_identical": true,
   "original_neutral_source": "src/esi/resources/rion-el.png",
   "original_neutral_psd_pixels_independently_checked": true,

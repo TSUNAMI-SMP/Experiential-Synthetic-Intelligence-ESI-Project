@@ -21,6 +21,8 @@ class Services(PreviousServices):
         settings = self.execution_settings
         if settings is not None:
             command = list(command) + [
+                "--cache-ram",
+                "256",
                 "--flash-attn",
                 settings.flash_attention,
                 "--cache-type-k",

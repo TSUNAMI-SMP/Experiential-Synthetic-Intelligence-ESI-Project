@@ -74,6 +74,18 @@ def compare(model_path, output):
                 landmarks = [(506, 72), (511, 76), (502, 80), (520, 82), (530, 70), (535, 75), (520, 62)]
                 for x, y in source_pixels(landmarks).round().astype(int):
                     assert frames[0][y, x, 3] > 240, "Original crown has a transparent hole"
+                # Fixed dark pixels on the original outer hair line. Coverage
+                # alone misses a mesh that cuts off the stroke but retains fill.
+                outline = [
+                    (437, 82), (425, 94), (415, 106), (407, 118), (400, 130),
+                    (395, 142), (387, 166), (384, 178), (380, 190),
+                    (570, 82), (582, 94), (591, 106), (598, 118), (605, 130),
+                    (610, 142), (618, 166), (621, 178), (627, 190),
+                ]
+                for index, (x, y) in enumerate(source_pixels(outline).round().astype(int)):
+                    region = frames[0][y - 2:y + 3, x - 2:x + 3]
+                    dark = (region[:, :, :3].max(axis=2) < 120) & (region[:, :, 3] > 180)
+                    assert np.any(dark), f"Original hair outline is clipped near {outline[index]}"
                 face_bounds = source_pixels([(450, 242), (559, 290)])
                 x0, y0 = np.floor(face_bounds.min(axis=0)).astype(int)
                 x1, y1 = np.ceil(face_bounds.max(axis=0)).astype(int)
@@ -109,6 +121,7 @@ def compare(model_path, output):
                     "all_meshes_stationary_during_blink": True,
                     "neutral_face_atlas_contamination_checked": True,
                     "original_crown_coverage_checked": True,
+                    "original_hair_outline_landmarks_checked": len(outline),
                     "visible_lash_width_pixels": widths,
                     "frame_sha256": [hashlib.sha256(a.tobytes()).hexdigest() for a in frames],
                 }
