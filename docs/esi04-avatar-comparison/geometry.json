@@ -1,0 +1,210 @@
+{
+  "renderer": "live2d-py",
+  "model": "src/esi/resources/rinne-el04/rinne-el.model3.json",
+  "phases": [
+    {
+      "phase": "neutral",
+      "changed": [],
+      "digest": "3977f83656108a51ee08e7156e5c40d82d00e25635d8b74def4618b2007a00aa"
+    },
+    {
+      "phase": "left_arm",
+      "changed": [
+        "Arm_viewer_left"
+      ],
+      "digest": "02cdf72420c1146b60d9098a91572d01108dc27415fd143a263ea6905a6cc89b"
+    },
+    {
+      "phase": "right_arm",
+      "changed": [
+        "Arm_viewer_right"
+      ],
+      "digest": "05f43abdfa135bd510ff7761c53c69fe0f7880398e10182d2674933e0ceaaaf1"
+    },
+    {
+      "phase": "both_arms",
+      "changed": [
+        "Arm_viewer_left",
+        "Arm_viewer_right"
+      ],
+      "digest": "ff31fffb922515a90eaab1e4e3a040abd795727c33a71f570cf8a5baf4fcbb59"
+    },
+    {
+      "phase": "left_arm_out",
+      "changed": [
+        "Arm_viewer_left"
+      ],
+      "digest": "985fdadda4bee7cc54eee6dda364c4b3d30b1aa06ebb4f1c7241921aab769801"
+    },
+    {
+      "phase": "right_arm_out",
+      "changed": [
+        "Arm_viewer_right"
+      ],
+      "digest": "c9ae5c15af0eea980579ddd68340b477be175b64e7d59666af9540858aae7b0f"
+    },
+    {
+      "phase": "both_arms_out",
+      "changed": [
+        "Arm_viewer_left",
+        "Arm_viewer_right"
+      ],
+      "digest": "025aecfc4faffa0c452a3ef06db3c566f9f4b9484e72fc725a5371107a672bfe"
+    },
+    {
+      "phase": "left_brow_lift",
+      "changed": [
+        "Brow_viewer_left"
+      ],
+      "digest": "6033ab3d0b5ca8e641e5cea5f8f93f2b60fdff0e3e31db9e8ce6a7078f246fce"
+    },
+    {
+      "phase": "right_brow_lift",
+      "changed": [
+        "Brow_viewer_right"
+      ],
+      "digest": "b921f6d1eceae2610a205bee91cf150bd7fafe835c0dbfdf89f61c4fb275f5ec"
+    },
+    {
+      "phase": "left_brow_angle",
+      "changed": [
+        "Brow_viewer_left"
+      ],
+      "digest": "a46d5270e0752ee3896c1b77f13ad42e9e8905b92f9c2c67a5fafce8bd1f2f00"
+    },
+    {
+      "phase": "right_brow_angle",
+      "changed": [
+        "Brow_viewer_right"
+      ],
+      "digest": "70e866683db6f82aeced1b8ca36e36cd69f93fdca4183c184ca81d6acf1cf22a"
+    },
+    {
+      "phase": "smile",
+      "changed": [
+        "Mouth_closed"
+      ],
+      "digest": "6e679eead3d1b765b7e423d967fa8ccd5bd385d72778b778781ab53cce1c89db"
+    },
+    {
+      "phase": "frown",
+      "changed": [
+        "Mouth_closed"
+      ],
+      "digest": "9da204bf3ed21f038a51b37da0ea353476c9f0b234d1a76c94fe511c94fa6faa"
+    },
+    {
+      "phase": "speaking",
+      "changed": [
+        "Mouth_open"
+      ],
+      "digest": "cb7e63289e5a98627bf29a65a8942cd42dda0864fe8e9013657331f183979721"
+    },
+    {
+      "phase": "left_blink",
+      "changed": [],
+      "digest": "b211216de24791be703aeb4d5c2c2c078908ebd73aa31013bb85ba267199a5f6"
+    },
+    {
+      "phase": "right_blink",
+      "changed": [],
+      "digest": "e1d658c3ac7ac396a25e285e225c4c4fc2e473b096a6e38fbfe96a02ead469dc"
+    },
+    {
+      "phase": "both_closed",
+      "changed": [],
+      "digest": "f700fd71b34610d0bb8b7a4fd483543e1a65e53f97183f10e421bc2b2b3cb82d"
+    },
+    {
+      "phase": "mid_blink",
+      "changed": [],
+      "digest": "f700fd71b34610d0bb8b7a4fd483543e1a65e53f97183f10e421bc2b2b3cb82d"
+    },
+    {
+      "phase": "reopened",
+      "changed": [],
+      "digest": "3977f83656108a51ee08e7156e5c40d82d00e25635d8b74def4618b2007a00aa"
+    },
+    {
+      "phase": "head",
+      "changed": [
+        "Brow_viewer_left",
+        "Brow_viewer_right",
+        "Ear_viewer_left",
+        "Ear_viewer_right",
+        "Eye_viewer_left_closed",
+        "Eye_viewer_left_open",
+        "Eye_viewer_right_closed",
+        "Eye_viewer_right_open",
+        "Face_skin_separate",
+        "Hair_back_left_lower",
+        "Hair_back_left_middle",
+        "Hair_back_left_upper",
+        "Hair_back_right_lower",
+        "Hair_back_right_middle",
+        "Hair_back_right_upper",
+        "Hair_front_bang_center",
+        "Hair_front_bang_left",
+        "Hair_front_crown",
+        "Hair_front_side_left",
+        "Hair_front_side_right",
+        "Halo",
+        "Mouth_clear_patch",
+        "Mouth_closed",
+        "Mouth_open",
+        "Neck_base_original"
+      ],
+      "digest": "9ce5eee85d6c857759230e33e465b75275fb22eb9ad11d03f0b18e926b780c46"
+    },
+    {
+      "phase": "body",
+      "changed": [
+        "Arm_viewer_left",
+        "Arm_viewer_right",
+        "Body_base",
+        "Brow_viewer_left",
+        "Brow_viewer_right",
+        "Collar_front",
+        "Ear_viewer_left",
+        "Ear_viewer_right",
+        "Eye_viewer_left_closed",
+        "Eye_viewer_left_open",
+        "Eye_viewer_right_closed",
+        "Eye_viewer_right_open",
+        "Face_skin_separate",
+        "Hair_back_left_lower",
+        "Hair_back_left_middle",
+        "Hair_back_left_upper",
+        "Hair_back_right_lower",
+        "Hair_back_right_middle",
+        "Hair_back_right_upper",
+        "Hair_front_bang_center",
+        "Hair_front_bang_left",
+        "Hair_front_crown",
+        "Hair_front_side_left",
+        "Hair_front_side_right",
+        "Halo",
+        "Mouth_clear_patch",
+        "Mouth_closed",
+        "Mouth_open",
+        "Neck_base_original"
+      ],
+      "digest": "b436244e5f65f83a50ed7c73bcd553e36e93fa623c5b9ff9a4c3a3d0b89623a0"
+    },
+    {
+      "phase": "hair",
+      "changed": [
+        "Hair_back_left_lower",
+        "Hair_back_left_middle",
+        "Hair_back_left_upper",
+        "Hair_back_right_lower",
+        "Hair_back_right_middle",
+        "Hair_back_right_upper"
+      ],
+      "digest": "7b5b2b63eb532796747883aea2a58c86d5d664553e01f34e70d5c6346382c7e9"
+    }
+  ],
+  "failures": [],
+  "physical_windows_checked": false,
+  "physical_audio_checked": false
+}

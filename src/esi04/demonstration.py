@@ -59,8 +59,7 @@ class Demonstration:
                 return
             target = element_at(before, x, y)
             if target:
-                values["selector"] = Selector(name=target.name, role=target.role,
-                                               automation_id=target.automation_id)
+                values["selector"] = Selector.for_element(target)
             else:
                 values["point"] = [round((x-before.physical.x)*1000/before.physical.width),
                                    round((y-before.physical.y)*1000/before.physical.height)]
@@ -72,7 +71,7 @@ class Demonstration:
                 self.skipped += 1
                 return
             target = targets[0]
-            selector = Selector(name=target.name, role=target.role, automation_id=target.automation_id)
+            selector = Selector.for_element(target)
             values.update(kind="type", text=target.value[:2000], selector=selector, replace=True,
                           expected=Postcondition(kind="element_value", selector=selector, value=target.value[:2000]))
         elif event["kind"] == "key":
@@ -91,7 +90,7 @@ class Demonstration:
             if len(changed) == 1:
                 e = changed[0]
                 values["expected"] = Postcondition(kind="element_value", value=e.value,
-                                                    selector=Selector(name=e.name, role=e.role, automation_id=e.automation_id))
+                                                    selector=Selector.for_element(e))
         self.steps.append(SkillStep(action=ComputerAction(**values), before_frame=before.id, after_frame=after.id,
                                     anchor_path=anchor_path, anchor_sha256=anchor_hash, anchor_offset=offset))
         self.hub.memory.pinned.add(after.id)

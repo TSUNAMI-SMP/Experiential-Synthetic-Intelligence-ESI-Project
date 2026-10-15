@@ -131,11 +131,16 @@ class Window(PreviousWindow):
             self.growth_timer.stop()
             self.performance_panel.shutdown()
 
+    def diagnostic_functions(self):
+        from esi03.diagnostics import collect_report, save_report
+
+        return collect_report, save_report
+
     def save_diagnostics(self):
         if self.diagnostics_future:
             return
         from esi02.diagnostics import runtime_observation
-        from esi03.diagnostics import collect_report, save_report
+        collect_report, save_report = self.diagnostic_functions()
 
         view = self.session.view()
         root = getattr(self.services, "root", Path(__file__).resolve().parents[2])

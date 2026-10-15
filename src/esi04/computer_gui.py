@@ -258,9 +258,16 @@ class ComputerPanel(QWidget):
         layout.addLayout(row)
         self.skills = QListWidget()
         layout.addWidget(self.skills)
+        self.allow_practice = QCheckBox("この実演を、自分で選んで練習してよい（PC操作の許可中だけ）")
+        self.allow_practice.toggled.connect(self.practice_changed)
+        self.skills.currentRowChanged.connect(self.selected_skill)
+        layout.addWidget(self.allow_practice)
         replay = QPushButton("選んだ実演を再現する")
         replay.clicked.connect(self.replay)
         layout.addWidget(replay)
+        remove = QPushButton("選んだ実演を削除する")
+        remove.clicked.connect(self.delete_skill)
+        layout.addWidget(remove)
         self.observation = QTextEdit()
         self.observation.setReadOnly(True)
         self.observation.setMaximumHeight(170)
@@ -269,6 +276,7 @@ class ComputerPanel(QWidget):
         supervisor.changed.connect(self.refresh)
         supervisor.skill_saved.connect(self.skill_added)
         self.loaded_skills = None
+        self.displayed_generation = None
         self.refresh()
 
     def refresh_screens(self):
@@ -334,8 +342,41 @@ class ComputerPanel(QWidget):
         if item:
             self.command("replay", {"id": item.data(Qt.ItemDataRole.UserRole)})
 
+    def selected_skill(self):
+        item = self.skills.currentItem()
+        skill = next((s for s in self.supervisor.hub.memory.skills()
+                      if item and s.id == item.data(Qt.ItemDataRole.UserRole)), None)
+        self.allow_practice.blockSignals(True)
+        self.allow_practice.setChecked(bool(skill and skill.practice_allowed))
+        self.allow_practice.blockSignals(False)
+
+    def delete_skill(self):
+        item = self.skills.currentItem()
+        if not item:
+            return
+        self.stop()
+        try:
+            self.supervisor.hub.memory.delete_skill(item.data(Qt.ItemDataRole.UserRole))
+            self.loaded_skills = None
+            self.refresh()
+        except (OSError, ValueError, RuntimeError) as exc:
+            self.status.setText(str(exc))
+
+    def practice_changed(self, value):
+        item = self.skills.currentItem()
+        skill = next((s for s in self.supervisor.hub.memory.skills()
+                      if item and s.id == item.data(Qt.ItemDataRole.UserRole)), None)
+        if skill:
+            skill.practice_allowed = bool(value)
+            self.supervisor.hub.memory.save_skill(skill)
+
     def refresh(self):
         grant, frame = self.supervisor.hub.grant, self.supervisor.hub.latest
+        if grant.generation != self.displayed_generation:
+            self.displayed_generation = grant.generation
+            self.allow_observe.setChecked(grant.observe)
+            self.allow_control.setChecked(grant.control)
+            self.allow_record.setChecked(grant.demonstrate)
         self.status.setText(("画面共有："+grant.screen+" / PC操作："+("許可" if grant.control else "停止")
                             + (" / 実演を記録中" if self.supervisor.recording else "")
                             + (" / "+frame.foreground.application if frame else " / 画面を待っています"))

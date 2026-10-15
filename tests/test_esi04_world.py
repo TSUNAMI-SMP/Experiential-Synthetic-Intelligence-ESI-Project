@@ -73,3 +73,38 @@ def test_autonomous_object_inspection_is_an_observed_activity_not_self_generated
         assert any(s.certainty == "observed" for s in session.cognition.summaries)
     finally:
         session.close()
+
+
+def test_removed_and_replaced_body_resources_use_actual_room_objects(tmp_path):
+    session = Session(tmp_path / "save.db", Settings(playback=False))
+    try:
+        session.scene_operation("remove", {"id": "rest"}, "remove:bed")
+        session.scene_operation("remove", {"id": "water"}, "remove:water")
+        session.world.body.fatigue = 0.95
+        session.world.body.hydration = 0.1
+        assert not any(c["kind"] in {"rest", "drink"} for c in session.brain.candidates(session.world, False))
+        session.advance_world(1, autonomy=True, allow_requests=False)
+        water = session.scene_operation("place", {"kind": "water", "position": {"x": 3.5, "y": 0.0, "z": 2.5}}, "new:water")
+        assert session.world.place("water").id == water["object_id"]
+        before = session.world.body.hydration
+        session.world.drink()
+        assert session.world.body.hydration > before
+        session.scene_operation("place", {"kind": "bed", "position": {"x": 1.1, "y": 0.0, "z": 1.1}}, "new:bed")
+        session.world.set_activity("resting")
+        session.advance_world(30)
+        assert session.world.near("rest") and session.world.body.activity == "resting"
+    finally:
+        session.close()
+
+
+def test_changing_the_scene_does_not_reward_an_interrupted_body_action(tmp_path):
+    session = Session(tmp_path / "save.db", Settings(playback=False))
+    try:
+        session.brain._begin(session.world, "rest", False)
+        old = session.brain.active
+        session.scene_operation("remove", {"id": "rest"}, "remove:rest")
+        assert session.brain.active is None
+        assert next(a for a in session.brain.state.actions if a.id == old.id).stage == "cancelled"
+        assert session.experience.state.habits["rest"].trials == 0
+    finally:
+        session.close()

@@ -84,13 +84,19 @@ class WindowsBackend:
 
     def elements(self, foreground):
         helper = Path(__file__).parent / "resources/uia.ps1"
-        result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                                 "-File", str(helper)], input=json.dumps({"handle": foreground.handle}),
-                                text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=8,
-                                creationflags=subprocess.CREATE_NO_WINDOW)
+        try:
+            result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                                     "-File", str(helper)], input=json.dumps({"handle": foreground.handle}),
+                                    text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=3,
+                                    creationflags=subprocess.CREATE_NO_WINDOW)
+        except (subprocess.TimeoutExpired, OSError):
+            return []  # Inaccessible app trees use actual visual recognition instead.
         if result.returncode:
             return []
-        raw = json.loads(result.stdout.lstrip("\ufeff"))
+        try:
+            raw = json.loads(result.stdout.lstrip("\ufeff"))
+        except ValueError:
+            return []
         return [Element.model_validate(item) for item in raw.get("elements", [])[:256]]
 
     def _send(self, inputs):
@@ -298,6 +304,8 @@ class WindowsRecorder:
         callback_type = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, ctypes.c_int, ctypes.c_size_t, ctypes.c_ssize_t)
         user.SetWindowsHookExW.argtypes = [ctypes.c_int, callback_type, w.HINSTANCE, w.DWORD]
         user.SetWindowsHookExW.restype = w.HHOOK
+        kernel.GetModuleHandleW.argtypes = [w.LPCWSTR]
+        kernel.GetModuleHandleW.restype = w.HMODULE
         user.CallNextHookEx.argtypes = [w.HHOOK, ctypes.c_int, ctypes.c_size_t, ctypes.c_ssize_t]
         user.CallNextHookEx.restype = ctypes.c_ssize_t
         user.UnhookWindowsHookEx.argtypes = [w.HHOOK]
@@ -335,7 +343,8 @@ class WindowsRecorder:
                         emit({"kind": "edit"})
             return user.CallNextHookEx(None, code, message, pointer)
         callbacks = callback_type(mouse), callback_type(keyboard)
-        hooks = [user.SetWindowsHookExW(kind, callback, None, 0) for kind, callback in zip((14, 13), callbacks)]
+        module = kernel.GetModuleHandleW(None)
+        hooks = [user.SetWindowsHookExW(kind, callback, module, 0) for kind, callback in zip((14, 13), callbacks)]
         if not all(hooks):
             self.error = "Windowsが操作実演の記録を許可しませんでした。"
         self.ready.set()

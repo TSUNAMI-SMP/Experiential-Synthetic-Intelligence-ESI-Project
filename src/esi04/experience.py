@@ -112,6 +112,11 @@ class Experience(PreviousExperience):
             (q for q in reversed(self.state.dialogue_questions) if q.stage == "unobserved"), None)
         if question is None:
             return None
+        if question.stage == "unobserved":
+            text = turn["input"].strip()
+            explicit_return = re.search(r"(?:さっき|前|先ほど)の質問", text)
+            if not explicit_return and len(grams(text) & grams(question.topic+question.text)) < 2:
+                return None
         relation = reply_relation(turn["input"], question)
         if question.stage == "uncertain" and YES.fullmatch(turn["input"].strip()):
             return {"question_id": question.id, "relation": "answered", "quote": question.reply_quote,
@@ -147,6 +152,15 @@ class Experience(PreviousExperience):
         self.trace("question_reply", "質問と次の発言の対応を保存", turn["id"],
                    question_id=question.id, relation=stage, reply_source=question.reply_turn)
         return question
+
+    def hold_for_topic(self, question, source_turn):
+        question.stage = "unobserved"
+        interest = next((i for i in self.state.interests if i.id == question.interest_id), None)
+        if interest:
+            interest.stage = "paused"
+        self.state.active_interest = None
+        self.trace("question_result", "別の話題へ移ったため、拒否や回答と決め付けず保留した", source_turn,
+                   question_id=question.id, stage="unobserved")
 
     def user_turn(self, turn):
         super().user_turn(turn)

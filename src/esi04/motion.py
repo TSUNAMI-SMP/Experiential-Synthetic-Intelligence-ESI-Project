@@ -17,7 +17,7 @@ def target_pose(state, elapsed, gaze=None):
               "ParamAngleZ": 0.5*sway, "ParamBodyAngleX": 0.5*sway, "ParamBodyAngleY": 0.0,
               "ParamBodyAngleZ": 0.3*sway, "ParamEyeBallX": 0.0, "ParamEyeBallY": 0.0,
               "ParamBrowLY": 0.0, "ParamBrowRY": 0.0, "ParamBrowLAngle": 0.0, "ParamBrowRAngle": 0.0,
-              "ParamEyeLSmile": 0.0, "ParamEyeRSmile": 0.0, "ParamCheek": 0.0, "ParamMouthForm": 0.0,
+              "ParamMouthForm": 0.0,
               "ParamArmLZ": 0.0, "ParamArmRZ": 0.0}
     if intention == "think":
         values.update(ParamAngleZ=4.0, ParamAngleY=-2.0, ParamEyeBallX=-0.25, ParamEyeBallY=-0.2)
@@ -31,8 +31,7 @@ def target_pose(state, elapsed, gaze=None):
         values.update(ParamAngleY=-3.0, ParamAngleZ=2.0, ParamBodyAngleX=-1.0)
     if emotion == "pleased":
         values.update(ParamBrowLY=0.25*strength, ParamBrowRY=0.25*strength,
-                      ParamMouthForm=0.7*strength, ParamEyeLSmile=0.2*strength,
-                      ParamEyeRSmile=0.2*strength, ParamCheek=0.25*strength)
+                      ParamMouthForm=0.7*strength)
     elif emotion in {"uncertain", "concerned"}:
         values.update(ParamBrowLY=0.15*strength, ParamBrowRY=-0.1*strength,
                       ParamBrowLAngle=-0.3*strength, ParamBrowRAngle=-0.3*strength, ParamMouthForm=-0.3*strength)

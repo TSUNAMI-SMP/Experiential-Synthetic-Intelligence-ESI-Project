@@ -12,6 +12,8 @@ class Brain(PreviousBrain):
     def candidates(self, world, allow_requests=True):
         self.state.cooldowns.pop("ask_talk", None)
         choices = super().candidates(world, allow_requests)
+        choices = [c for c in choices if c["kind"] not in {"rest", "drink"}
+                   or world.place("rest" if c["kind"] == "rest" else "water") is not None]
         # A previously reachable cell can become occupied after furniture placement.
         if not any(world.free(x+0.5, z+0.5) for x in range(6) for z in range(5)):
             choices = [c for c in choices if c["kind"] != "explore"]
@@ -21,6 +23,8 @@ class Brain(PreviousBrain):
         action = super()._begin(world, kind, explored)
         if kind == "explore":
             action.target = world.path[-1] if world.path else world.destination
+        elif kind == "drink":
+            action.target = world.place("water").position.model_copy(deep=True)
         if kind.startswith("ask_"):
             self.state.cooldowns.pop(kind, None)
             if kind == "ask_talk":

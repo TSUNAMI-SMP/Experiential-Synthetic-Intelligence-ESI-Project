@@ -152,6 +152,8 @@ class Services(PreviousServices):
             self.ensure_vision(settings, cancellation)
             result = VisionClient(settings).observe(frame, question, cancellation)
         except (RuntimeError, httpx.HTTPError) as exc:
+            if cancellation.event.is_set():
+                raise Cancelled() from exc
             if settings.vision_device != "auto" or self.vision_backend.get("device") != "cuda":
                 raise
             self.stop_vision()

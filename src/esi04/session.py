@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import Field
 
 from esi.models import uid
+from esi02.memory import grams
 from esi03.session import SavedState as PreviousSavedState
 from esi03.session import Session as PreviousSession
 from esi03.storage import atomic
@@ -49,6 +50,7 @@ class Session(PreviousSession):
 
     def restore_additional(self, state):
         self.cognition = state.cognition.model_copy(deep=True)
+        self.cognition.pending_computer_task = ""  # Interrupted real-PC requests never resume on a new grant.
 
     def _remember(self, turn):
         super()._remember(turn)
@@ -89,6 +91,8 @@ class Session(PreviousSession):
         event = self.world.object_operation(operation, values, source_id)
         if not event:
             return None
+        if self.brain.active:
+            self._record_motivation(self.brain.intervention(self.world, "scene", {}))
         self.store.db.execute("INSERT INTO esi04_scene_effects VALUES (?)", (source_id,))
         obj = event["object"]
         description = {"place": "物を置いた", "move": "物を移動した", "remove": "物を取り除いた",
@@ -136,13 +140,17 @@ class Session(PreviousSession):
                                      "cognition": cognition,
                                      "screen": current.get("screen_observation"),
                                      "screen_error": current.get("screen_error"),
+                                     "screen_teachings": self.screen_recall(query),
                                      "computer_request": current.get("computer_request"),
+                                     "computer_stopped": current.get("computer_stopped", False),
                                      "computer_available": self.status.get("computer_access", False)})
             return context
 
     @atomic
     def screen_observed(self, result, turn_id=None):
         observation = ScreenObservation.model_validate(result["observation"])
+        if result.get("context_id"):
+            self.agency.remember_processed("observed:"+result["context_id"])
         self.cognition.last_screen = observation
         self.cognition.intention = "inspect"
         self.cognition.attention = "共有された画面"
@@ -153,6 +161,14 @@ class Session(PreviousSession):
                               [observation.frame_id, observation.id], outcome=observation.result.description[:400],
                               certainty="inferred")
         self._write([("screen_observation", observation.model_dump())])
+
+    def screen_recall(self, query):
+        if not re.search(r"画面|教えた|覚えて|あのボタン|このボタン|さっきの説明", query):
+            return []
+        terms = grams(query)
+        entries = sorted(self.cognition.screen_teachings,
+                         key=lambda item: (len(terms & grams(item.user_text)), item.observed_at), reverse=True)
+        return [i.model_dump() for i in entries[:2] if len(terms & grams(i.user_text)) >= 2 or "教えた" in query]
 
     @atomic
     def screen_taught(self, value):
@@ -186,7 +202,7 @@ class Session(PreviousSession):
             if interest and self.experience.state.availability != "busy":
                 interest.priority = max(0.95, interest.priority)
                 self.brain.state.next_decision = self.world.elapsed
-        elif plan.action == "rest" and not self.brain.active:
+        elif plan.action == "rest" and not self.brain.active and self.world.place("rest") is not None:
             self.brain._begin(self.world, "rest", False)
             self.cognition.intention = "rest"
         self._write([("idle_decision", {"context": key, "plan": plan.model_dump(), "is_factual_evidence": False})])
@@ -226,6 +242,12 @@ class Session(PreviousSession):
         interest_id = result.pop("asked_interest", None)
         followup = result.pop("asked_followup", False)
         super().dialogue_result(turn_id, result)
+        pending = self.experience.pending_question()
+        if (pending and pending.stage == "pending" and turn.get("question_reply", {}).get("relation") == "other"
+                and len(grams(turn["input"]) & grams(pending.topic+pending.text)) < 2):
+            self.experience.hold_for_topic(pending, turn_id)
+            if self.brain.active and self.brain.active.id == pending.action_id:
+                self._record_motivation([self.brain._resolve(self.world, None, "cancelled", "相手の新しい話題を優先した")])
         if interest_id:
             self.experience.asked(interest_id, "chat:"+turn_id)
         elif followup and result.get("followup_text"):

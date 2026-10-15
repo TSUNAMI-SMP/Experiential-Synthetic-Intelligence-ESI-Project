@@ -46,7 +46,7 @@ class Agency:
             return False
         if session.world.destination:
             return True
-        if not session.world.near(item.id, 0.9):
+        if not session.world.near_object(item.id, 0.9):
             try:
                 session.world.move_to(session.world.approach(item).model_dump())
             except ValueError as exc:
@@ -82,6 +82,9 @@ class Agency:
                     candidates.append((score, item, "eat", "食べ物への関心と満足・活動余力を考えた"))
             elif item.kind == "ball" and state.needs.pleasure > 0.35 and state.habits["play"].satiation < 0.6:
                 candidates.append((0.3*state.needs.pleasure, item, "play", "気分転換したいという欲求がある"))
+            elif item.kind in {"book", "computer"} and item.used == 0:
+                candidates.append((0.2*state.needs.growth+0.15*state.needs.competence, item, "use",
+                                   "調べた物を使って、できることを試したい"))
         if not candidates:
             return False
         score, item, action, reason = max(candidates, key=lambda c: c[0])
@@ -94,7 +97,7 @@ class Agency:
         cognition.intention = "inspect" if action == "inspect" else "play" if action == "play" else "enjoy"
         self.summarize("行動を選ぶ", item.label, reason, ["world:"+item.id],
                        alternatives=[c[2]+":"+c[1].label for c in candidates[:6]])
-        if not world.near(item.id, 0.9):
+        if not world.near_object(item.id, 0.9):
             try:
                 world.move_to(world.approach(item).model_dump())
             except ValueError as exc:

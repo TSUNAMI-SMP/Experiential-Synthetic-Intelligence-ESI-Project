@@ -11,7 +11,7 @@ from esi04.structured import request
 
 
 class FocusPlan(Model):
-    action: Literal["inspect", "ask", "research", "practice", "rest", "review", "none"]
+    action: Literal["inspect", "ask", "research", "practice", "observe_screen", "rest", "review", "none"]
     target_id: str = Field(max_length=100)
     reason: str = Field(max_length=240)
     alternatives: list[str] = Field(max_length=5)
@@ -22,12 +22,13 @@ SYSTEM = """ESI-04として、会話がない間に今ある体験を見直し�
 出力は構造化した行動の候補だけ。知識の説明や事実を新しく作らない。
 target_idは提示されたobjects/interests/skillsのIDのみ。rest/review/noneは空文字。
 同じ証拠から同じ質問を繰り返さない。相手が忙しい時は質問を控える。
-practiceは練習を許可された実演だけ。自分の休息・好奇心・成長と相手の都合を比べる。
+practiceは練習を許可された実演だけ。observe_screenは提示されたscreenのIDがある時だけ。
+自分の休息・好奇心・成長と相手の都合を比べる。
 reasonは選択の短い説明、alternativesは比べた行動名。詳細な思考の書き起こしは不要。
 """
 
 
-def context(session, skills=()):
+def context(session, skills=(), screen=None):
     with session.lock:
         state, world = session.experience.state, session.world
         items = [i for i in state.interests if i.stage in {"open", "paused"}][:6]
@@ -39,7 +40,7 @@ def context(session, skills=()):
                              for o in world.objects if o.discovered and o.quantity > 0][:12],
                  "skills": [{"id": s.id, "name": s.name} for s in skills if s.complete and s.practice_allowed][:8],
                  "beliefs": [{"id": b["id"], "label": b["label"], "conflicted": b.get("conflicted", False)}
-                             for b in session.knowledge.entries()[:6]]}
+                             for b in session.knowledge.entries()[:6]], "screen": screen}
         signature_data = {k: v for k, v in value.items() if k not in {"body", "needs"}}
         signature_data["body_band"] = [int(world.body.energy*3), int(world.body.fatigue*3)]
         signature = hashlib.sha256(json.dumps(signature_data, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:24]
@@ -49,6 +50,8 @@ def context(session, skills=()):
 def deliberate(settings, value, cancellation):
     plan = request(settings, SYSTEM, value, FocusPlan, cancellation, 384)
     allowed = {i["id"] for group in ("interests", "objects", "skills") for i in value[group]}
+    if value.get("screen"):
+        allowed.add(value["screen"]["id"])
     if plan.action not in {"none", "review", "rest"} and plan.target_id not in allowed:
         raise ValueError("保存された体験にない対象を選んだので、行動に適用しませんでした。")
     if plan.action in {"ask", "research"} and plan.target_id not in {i["id"] for i in value["interests"]}:
@@ -57,4 +60,6 @@ def deliberate(settings, value, cancellation):
         raise ValueError("練習を許可していない実演は開始しませんでした。")
     if plan.action == "inspect" and plan.target_id not in {i["id"] for i in value["objects"]}:
         raise ValueError("まだ見ていない物体は調べに行きませんでした。")
+    if plan.action == "observe_screen" and (not value.get("screen") or plan.target_id != value["screen"]["id"]):
+        raise ValueError("共有されていない画面は観察しませんでした。")
     return plan

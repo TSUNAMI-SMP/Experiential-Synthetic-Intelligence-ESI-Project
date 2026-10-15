@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from PySide6.QtWidgets import QFileDialog, QLabel
+from PySide6.QtWidgets import QFileDialog, QLabel, QScrollArea
 
 from esi02.avatar_assets import BUNDLED_MODEL as PREVIOUS_MODEL
 from esi03.gui import Window as PreviousWindow
@@ -39,7 +39,7 @@ class Window(PreviousWindow):
         return WorldPanel(self)
 
     def __init__(self, *args, **kwargs):
-        self.computer_supervisor, self.computer_panel = None, None
+        self.computer_supervisor, self.computer_panel, self.computer_scroll = None, None, None
         super().__init__(*args, **kwargs)
         self.setup_computer()
 
@@ -47,18 +47,22 @@ class Window(PreviousWindow):
         if self.computer_supervisor:
             self.computer_supervisor.shutdown()
         if self.computer_panel:
-            index = self.tabs.indexOf(self.computer_panel)
+            index = self.tabs.indexOf(self.computer_scroll)
             self.tabs.removeTab(index)
-            self.computer_panel.deleteLater()
+            self.computer_scroll.deleteLater()
         try:
-            self.computer_supervisor = ComputerSupervisor(self.session.store.path.parent / "screen",
+            screen_root = self.session.store.path.with_name(self.session.store.path.stem+".screen")
+            self.computer_supervisor = ComputerSupervisor(screen_root,
                                                           self.session.settings.screen_history_mb, self)
             self.computer_panel = ComputerPanel(self, self.computer_supervisor)
         except OSError as exc:
             self.computer_supervisor = None
             self.computer_panel = QLabel("この表示環境では画面・PC操作を開始できません："+str(exc))
             self.computer_panel.setWordWrap(True)
-        self.tabs.addTab(self.computer_panel, "画面・PC操作・実演")
+        self.computer_scroll = QScrollArea()
+        self.computer_scroll.setWidgetResizable(True)
+        self.computer_scroll.setWidget(self.computer_panel)
+        self.tabs.addTab(self.computer_scroll, "画面・PC操作・実演")
 
     def scene_action(self, operation, values):
         try:
@@ -127,6 +131,7 @@ class Window(PreviousWindow):
     def refresh(self):
         super().refresh()
         if self.computer_panel and isinstance(self.computer_panel, ComputerPanel):
+            self.computer_panel.refresh()
             status = self.session.status
             observation = status.get("screen_observation")
             if observation:
@@ -142,3 +147,11 @@ class Window(PreviousWindow):
         super().closeEvent(event)
         if event.isAccepted() and self.computer_supervisor:
             self.computer_supervisor.shutdown()
+
+    def diagnostic_functions(self):
+        from esi04.diagnostics import collect_report, save_report
+
+        backend = dict(getattr(self.services, "vision_backend", {}))
+        def collect(*args, **kwargs):
+            return collect_report(*args, **kwargs, vision_backend=backend)
+        return collect, save_report

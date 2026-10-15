@@ -1,0 +1,63 @@
+{
+  "character": "凛音エル",
+  "release": "ESI-04",
+  "authoring": "Live2D Cubism Editor 5.3.04 FREE",
+  "export_target": "Cubism SDK 4.2",
+  "texture": [
+    2048,
+    2048
+  ],
+  "parameter_count": 29,
+  "drawable_count": 29,
+  "source_project": "docs/avatar-materials/esi04-source-work/rinne-el-rigged-working.cmo3",
+  "source_sha256": "d14685e490224ed8d73eb3bc6042a9c46d3e71f6fbf8d456f487ed145a5e24a2",
+  "source_reexport_identical": true,
+  "native_geometry_checked": true,
+  "native_phases_checked": 22,
+  "blink_meshes_stationary": true,
+  "blink_reopening_pixels_identical": true,
+  "hand_digits_visual_checked": {
+    "left": 5,
+    "right": 5
+  },
+  "arms_independent": true,
+  "arm_endpoint_clipping_checked": true,
+  "brows_independent": true,
+  "closed_mouth_expression_bound": true,
+  "neutral_eyes_brows_pixels_identical_to_esi03": true,
+  "texture_identical_to_esi03": true,
+  "physical_windows_checked": false,
+  "physical_audio_checked": false,
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 1915,
+      "sha256": "fcfca5124a0c1f6652c1c94bfdd69c79ab9e176fad1d03ee922d29b88001cd08"
+    },
+    {
+      "path": "rinne-el.2048/texture_00.png",
+      "bytes": 1717113,
+      "sha256": "125d68c47f88c36bd7a23e8f46cd4a3b83128ae1e1f838654250e248b1839cc5"
+    },
+    {
+      "path": "rinne-el.cdi3.json",
+      "bytes": 2544,
+      "sha256": "ce0b7649de3d102ed00fe2eb312e5f07c46714d11f1fc518446c97148e7db732"
+    },
+    {
+      "path": "rinne-el.moc3",
+      "bytes": 30720,
+      "sha256": "030a97cfd66993249614b10bf006dd887fee89545128d94b52574bc059a4828a"
+    },
+    {
+      "path": "rinne-el.model3.json",
+      "bytes": 428,
+      "sha256": "a4bf7be796b69f9dad5a3761f92eb6f53733940cd89f66c9e4a080b3778f3fb9"
+    },
+    {
+      "path": "rinne-el.physics3.json",
+      "bytes": 1997,
+      "sha256": "850e794f22b70296d7c428ce550a704eb155c71187d3d3a2b1b2e4720de3002f"
+    }
+  ]
+}

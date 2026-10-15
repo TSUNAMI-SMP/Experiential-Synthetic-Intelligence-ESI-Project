@@ -38,8 +38,11 @@ def collect_report(root, settings, database=None, selections=None, observation=N
     report["computer"] = {"grants_restored_on_start": False, "screen_contents_included": False,
                           "actual_input_checked": False, "windows_demo_checked": False}
     if database:
-        display = read_preferences(Path(database).parent / "esi04-desktop.json")
-        report["checks"]["avatar"]["model_file_present"] = bool(display.model_path and model_file(display.model_path).is_file())
+        try:
+            display = read_preferences(Path(database).parent / "esi04-desktop.json")
+            report["checks"]["avatar"]["model_file_present"] = bool(display.model_path and model_file(display.model_path).is_file())
+        except (OSError, ValueError):
+            report["checks"]["avatar"].update(state="invalid_preferences", model_file_present=False)
     report["model_format"] = {"language_weights": "Q4_K_M", "vision_weights": "Q4_K_M", "nvfp4": False}
     return sanitize(report, root)
 

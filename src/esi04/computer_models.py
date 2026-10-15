@@ -75,6 +75,12 @@ class Selector(Model):
     role: str = Field(default="", max_length=100)
     automation_id: str = Field(default="", max_length=300)
 
+    @classmethod
+    def for_element(cls, element):
+        # Stable automation IDs survive changing captions and edited field contents.
+        return cls(name="" if element.automation_id else element.name,
+                   role=element.role, automation_id=element.automation_id)
+
     def matches(self, element):
         return bool(self.name or self.automation_id) and all(
             not getattr(self, key) or getattr(self, key) == getattr(element, key)
@@ -89,7 +95,7 @@ class Postcondition(Model):
 
 class ComputerAction(Model):
     kind: Literal["click", "double_click", "move", "type", "key", "scroll"]
-    frame_id: str = Field(max_length=64)
+    frame_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     selector: Selector | None = None
     # Coordinates are normalized to the recorded frame, never global invented positions.
     point: list[int] | None = Field(default=None, min_length=2, max_length=2)

@@ -101,6 +101,12 @@ class World(PreviousWorld):
             raise ValueError("物体を一つ選んでください。同名の場合は一覧のIDで指定できます。")
         return matches[0]
 
+    def place(self, name):
+        kind = {"rest": "bed", "water": "water"}.get(name)
+        matches = [o for o in self.objects if o.quantity > 0 and o.position.y <= 1.7
+                   and (o.kind == kind if kind else o.id == name)]
+        return min(matches, key=lambda o: self.position.distance(o.position)) if matches else None
+
     def free(self, x, z):
         if not 0.16 <= x <= 5.84 or not 0.16 <= z <= 4.84:
             return False
@@ -108,7 +114,14 @@ class World(PreviousWorld):
                        and abs(z-o.position.z) < o.size[1]/2+0.16 for o in self.objects)
 
     def near(self, place, radius=0.8):
-        item = next((o for o in self.objects if o.id == place and o.quantity > 0), None)
+        item = self.place(place)
+        return self._near_item(item, radius)
+
+    def near_object(self, identifier, radius=0.8):
+        item = next((o for o in self.objects if o.id == identifier and o.quantity > 0), None)
+        return self._near_item(item, radius)
+
+    def _near_item(self, item, radius):
         return bool(item and (radius > 1 or item.position.y <= 1.7)
                     and math.hypot(self.position.x-item.position.x, self.position.z-item.position.z) <= radius)
 
@@ -155,15 +168,19 @@ class World(PreviousWorld):
             target = min(cells, key=target.distance)
         if target.y != 0 or after not in {"idle", "resting", "exploring"}:
             raise ValueError("移動先と行動が正しくありません。")
-        if after == "resting" and not math.hypot(target.x-self.get("rest").position.x,
-                                                target.z-self.get("rest").position.z) <= 0.8:
+        bed = self.place("rest")
+        if after == "resting" and (bed is None or not math.hypot(target.x-bed.position.x,
+                                                               target.z-bed.position.z) <= 0.8):
             raise ValueError("休む場所の近くで休んでください。")
         path = self.route(target)
         self.path, self.destination, self.activity_after_move = path[1:], path[0], after
         self.body.activity = "moving"
 
     def go_to(self, place):
-        self.move_to(self.approach(self.get(place)).model_dump(), "resting" if place == "rest" else "idle")
+        item = self.place(place)
+        if item is None:
+            raise ValueError("休む場所がありません。ベッドを置いてください。" if place == "rest" else "使える場所がありません。水などを置いてください。")
+        self.move_to(self.approach(item).model_dump(), "resting" if place == "rest" else "idle")
 
     def set_activity(self, activity):
         super().set_activity(activity)
@@ -202,8 +219,6 @@ class World(PreviousWorld):
             item_id = item.id
         elif operation in {"move", "remove"}:
             item = self.get(item_id)
-            if item.id in {"rest", "water", "window"} and operation == "remove":
-                raise ValueError("身体維持に使う休憩場所・水・窓は移動で調整してください。")
             if operation == "remove":
                 data["objects"] = [o for o in data["objects"] if o["id"] != item_id and o["parent_id"] != item_id]
             else:
@@ -220,7 +235,7 @@ class World(PreviousWorld):
                             obj["parent_id"] = parent_id
         elif operation in {"inspect", "eat", "use", "play"}:
             item = self.get(item_id)
-            if not self.near(item_id, 0.9):
+            if not self.near_object(item_id, 0.9):
                 raise ValueError("物体の近くに移動してから行動してください。")
             if item.quantity <= 0:
                 raise ValueError("その物はもう残っていません。")
@@ -257,7 +272,7 @@ class World(PreviousWorld):
     def discover(self):
         found = []
         for item in self.objects:
-            if item.quantity > 0 and not item.discovered and self.near(item.id, 2.5):
+            if item.quantity > 0 and not item.discovered and self.near_object(item.id, 2.5):
                 item.discovered = True
                 found.append(item.id)
         self.discoveries += len(found)

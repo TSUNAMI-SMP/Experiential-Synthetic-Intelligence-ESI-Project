@@ -131,6 +131,9 @@ intentには、相手の発言の意味に合う種類を指定する。自己�
 直前の質問への答えはanswer、知識の説明はrecall、教えはteaching、その他の対話はchat。
 「仮想」という単語だけで身体報告にしない。answer_toは対応する保存済み質問ID、他は空文字。
 opening/reflectionは短い相づち、気になる・試してみたい・迷っている等の意図を自然に組み合わせる。
+intent_hintがchatなら、相手の体験の話として受け止める。「私は〜」は相手の話。
+相手が体験を話しただけなら、自分の欲求や身体の状態に話題を変えない。
+尋ねたいことはopeningに書かず、questionとinterest_idで選ぶ。
 """
 
     def stream(self, text, history, cancellation, on_delta, on_sentence, context=None):
@@ -144,6 +147,8 @@ opening/reflectionは短い相づち、気になる・試してみたい・迷�
         def emit(answer, **extra):
             return self._emit_answer(answer, cancellation, on_delta, on_sentence, **(metadata | extra))
         dialogue = context.get("dialogue", {})
+        if dialogue.get("computer_stopped"):
+            return emit("画面の観察とPC操作を停止したよ。")
         if dialogue.get("screen_error"):
             return emit("今の画面を読み取れなかったよ。"+dialogue["screen_error"], intent="screen_error")
         if dialogue.get("screen"):
@@ -154,6 +159,10 @@ opening/reflectionは短い相づち、気になる・試してみたい・迷�
             if result.get("uncertain"):
                 answer += "細かい部分はまだ確信がないので、一緒に確かめたいな。"
             return emit(answer, intent="screen", grounding={"policy": "visual_inference", "refs": [observation["id"]]})
+        if dialogue.get("screen_teachings") and re.search(r"覚えて|教えた|説明|何だった|どれだった", text):
+            entry = dialogue["screen_teachings"][0]
+            return emit(f"あの画面では、「{entry['user_text'][:700]}」と教わったよ。",
+                        intent="screen_recall", grounding={"policy": "user_explanation_of_screen", "refs": [entry["id"], entry["frame_id"]]})
         if dialogue.get("computer_request"):
             return emit("画面を確かめながら操作してみるね。途中で対象や結果が分からなくなったら止まるよ。" if dialogue.get("computer_available")
                         else "PC操作は今は停止しているよ。画面・PC操作タブで許可すると、画面を確かめながら試せるよ。", intent="computer")
@@ -222,7 +231,11 @@ opening/reflectionは短い相づち、気になる・試してみたい・迷�
         if intent == "unknown":
             return emit(alternate(("そのことはまだ知らない。教えてもらえる？", "まだ自分では説明できない。知っていきたいな。"), history), unknown_topic=unknown_topic(text))
         available = {i["id"]: i for i in context.get("knowledge", [])+context.get("memories", []) if relevant(i, text)}
-        fallback = ResponsePlan(opening="教えてくれてありがとう" if intent == "teaching" else "そうなんだ",
+        acknowledgement = "教えてくれてありがとう" if intent == "teaching" else "そうなんだ"
+        if intent == "chat" and re.match(r"(?:私|僕|わたし)は", text) and not re.search(r"[？?]", text):
+            detail = re.sub(r"^(?:私|僕|わたし)は", "", text).strip("。！! ")[:100]
+            acknowledgement = f"「{detail}」という話だね"
+        fallback = ResponsePlan(opening=acknowledgement,
                                 reflection="", refs=list(available)[:3], question="none", interest_id="",
                                 intent=intent, answer_to="")
         context["intent_hint"] = intent
@@ -233,9 +246,7 @@ opening/reflectionは短い相づち、気になる・試してみたい・迷�
                 and link.get("relation") == "other" and not re.search(r"[？?]|教えて|何|どこ|誰", text)):
             return emit("今の言葉は、さっき私が尋ねたことへの答え、という受け取り方で合っている？",
                         question_binding={"question_id": pending["id"], "relation": "uncertain", "quote": text})
-        # Model interpretation may refine ambiguous chat, but never fabricate facts.
-        if intent == "chat" and plan.intent in {"self_desire", "self_interest", "comfort"}:
-            return emit(comfort(context) if plan.intent == "comfort" else self_desire(context), intent=plan.intent)
+        # A model-selected self-intent must not redirect a story about the user to ESI's body or desires.
         opening = checked_expression(plan.opening, context)
         reflection = checked_expression(plan.reflection, context)
         selected = [available[i] for i in dict.fromkeys(plan.refs) if i in available]

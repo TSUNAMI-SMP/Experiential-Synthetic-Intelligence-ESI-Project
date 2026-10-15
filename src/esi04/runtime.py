@@ -1,19 +1,39 @@
 """ESI-04 owner: cancellable screen/PC work, idle deliberation and natural conversation."""
 
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 
+from esi.models import uid, utc
 from esi02.dialogue import Cancellation, Cancelled
 from esi02.runtime import Runtime as AudioRuntime
 from esi03.runtime import Runtime as PreviousRuntime
+from esi04.attention import screen_context
 from esi04.computer_agent import ComputerAgent
+from esi04.computer_models import ScreenTeaching
 from esi04.deliberation import context as idle_context
 from esi04.deliberation import deliberate
 from esi04.dialogue import DialogueLLM
 
-SCREEN_QUERY = re.compile(r"(?:この|今の|共有|見せ|画面|動画).*(?:画面|動画|見える|映って|何|どこ|どう|読んで|見て)|(?:画面|動画).*(?:教えて|説明|見て)")
-PC_COMMAND = re.compile(r"(?:クリックして|ダブルクリックして|入力して|スクロールして|押して|操作して|開いて|実演.*(?:やって|再現)|動かして)")
+SCREEN_QUERY = re.compile(r"(?:画面|動画|ウィンドウ).*(?:見える|映って|何|どこ|どう|読んで|見て|教えて|説明|ですか|ますか|[？?])|(?:この|今の).*(?:ボタン|アイコン|入力欄).*(?:何|どこ|どう|教えて|ですか|ますか|[？?])")
+SCREEN_TEACHING = re.compile(r"(?:この|今の|画面の).*(?:ボタン|アイコン|入力欄|表示|画面).*(?:は|が|を).+(?:です|だよ|という|っていう|使う|使います)[。！!\s]*$")
+PC_COMMAND = re.compile(r"(?:クリックして|ダブルクリックして|入力して|スクロールして|押して|操作して|開いて|動かして)(?:ください|くれる|ね|みて)?(?:[。！？!?\s]|$)")
 HYPOTHETICAL = re.compile(r"できる|できますか|方法|例えば|仮に|したら|すれば")
+SKILL_COMMAND = re.compile(r"再現して|やって(?:みて)?|実行して|練習して")
+STOP_COMPUTER = re.compile(r"(?:PC|パソコン|操作|画面共有|画面|マウス|キーボード).*(?:止めて|停止して|やめて|解除して|見ないで|しないで)")
+
+
+def requested_skill(text, skills):
+    if not SKILL_COMMAND.search(text) or HYPOTHETICAL.search(text):
+        return None
+    matches = [skill for skill in skills if skill.name in text]
+    if len(matches) > 1:
+        # A longer, explicitly named skill takes precedence over a substring name.
+        matches = [skill for skill in matches if not any(
+            skill.name != other.name and skill.name in other.name for other in matches)]
+    if len(matches) != 1:
+        return None
+    return matches[0]
 
 
 class Runtime(PreviousRuntime):
@@ -44,13 +64,30 @@ class Runtime(PreviousRuntime):
         if turn.get("recognition_needs_confirmation") or not turn.get("use_in_dialogue_history", True):
             return
         text = turn["input"]
-        if self.computer and PC_COMMAND.search(text) and not HYPOTHETICAL.search(text):
+        if self.computer and STOP_COMPUTER.search(text):
+            self.computer.revoke()
+            self.session.update_turn(turn["id"], computer_stopped=True)
+            self._status("computer_access", False)
+            self._status("computer_phase", "waiting")
+            return
+        self._status("computer_access", bool(self.computer and self.computer.grant.control))
+        if turn.get("scene_result") is not None:
+            return
+        skill = requested_skill(text, self.computer.memory.skills()) if self.computer else None
+        if self.computer and (skill or PC_COMMAND.search(text)) and not HYPOTHETICAL.search(text):
             self.session.update_turn(turn["id"], computer_request=text)
             if self.computer.grant.control:
                 self.session.cognition.pending_computer_task = text[:1000]
         elif self.computer and self.computer.grant.observe and SCREEN_QUERY.search(text):
             self.session.update_turn(turn["id"], screen_query=True)
-        self._status("computer_access", bool(self.computer and self.computer.grant.control))
+        elif (self.computer and self.computer.grant.observe and not re.search(r"[？?]|ですか|ますか", text)
+              and SCREEN_TEACHING.search(text)):
+            frame = self.computer.latest
+            if frame and frame.generation == self.computer.grant.generation and time.monotonic()-frame.captured_at <= 3:
+                teaching = ScreenTeaching(id=uid(), frame_id=frame.id, frame_sha256=frame.sha256,
+                                          user_text=text[:2000], observed_at=utc())
+                self.computer.memory.record("teachings", teaching)
+                self.session.screen_taught(teaching.model_dump())
 
     def _start_computer(self, operation, values, turn_id=None):
         if not self.computer or not self.services:
@@ -62,21 +99,25 @@ class Runtime(PreviousRuntime):
         cancellation = Cancellation()
         agent = ComputerAgent(self.settings, self.computer, self.services)
         kind = "screen_for_reply" if turn_id else "computer"
-        self.computer_task = {"operation": operation, "cancellation": cancellation}
-        self._status("computer_phase", "observing" if operation == "observe" else "operating")
         if operation == "observe":
             function, arguments = agent.observe, (values.get("question", "画面には何が見える？"), cancellation)
         elif operation == "task":
-            function, arguments = agent.run, (values["goal"], cancellation,
-                                              lambda result: self._telemetry("computer_step", result))
+            skill = requested_skill(values["goal"], self.computer.memory.skills())
+            if skill:
+                operation = "replay"
+                function, arguments = self.computer.replay, (skill.model_dump(), cancellation)
+            else:
+                function, arguments = agent.run, (values["goal"], cancellation,
+                                                  lambda result: self._telemetry("computer_step", result))
         elif operation == "replay":
             skill = next((s for s in self.computer.memory.skills() if s.id == values["id"]), None)
             if skill is None:
                 raise ValueError("その実演は見つかりません。")
             function, arguments = self.computer.replay, (skill.model_dump(), cancellation)
         else:
-            self.computer_task = None
             raise ValueError("利用できないPC操作です。")
+        self.computer_task = {"operation": operation, "cancellation": cancellation}
+        self._status("computer_phase", "observing" if operation == "observe" else "operating")
         self._job("computer", kind, function, *arguments, operation=operation, cancellation=cancellation,
                   turn_id=turn_id, generation=self.computer.grant.generation)
 
@@ -147,6 +188,8 @@ class Runtime(PreviousRuntime):
                                 self._control("research_interest", result.target_id)
                         elif result.action == "practice" and self.computer and self.computer.grant.control:
                             self._start_computer("replay", {"id": result.target_id})
+                        elif result.action == "observe_screen" and self.computer and self.computer.grant.observe:
+                            self._start_computer("observe", {"question": "画面に何が見える？どんな内容か、見える範囲だけ教えて。"})
                     self._status("cognition_phase", "waiting")
                     continue
                 if not self.computer or self.computer.grant.generation != job["generation"]:
@@ -173,6 +216,9 @@ class Runtime(PreviousRuntime):
                     self.session.update_turn(job["turn_id"], screen_error="画面の観察を中止しました。")
                     self.current["generation_started"] = False
             except Exception as exc:
+                if job["cancellation"].event.is_set():
+                    self._status("cognition_phase" if job["kind"] == "deliberation" else "computer_phase", "waiting")
+                    continue
                 name = "cognition_error" if job["kind"] == "deliberation" else "computer_error"
                 self._status(name, str(exc))
                 if job["kind"] == "deliberation":
@@ -216,18 +262,22 @@ class Runtime(PreviousRuntime):
                 or (self.current and self._is_current(self.current["turn_id"]))
                 or self._voice_busy() or self.session.status.get("audio_input", {}).get("asr_busy")):
             return
-        if self.session.cognition.pending_computer_task and self.computer and self.computer.grant.control:
-            goal = self.session.cognition.pending_computer_task
-            self.session.cognition.pending_computer_task = ""
-            self._start_computer("task", {"goal": goal})
-            return
         preferences, world = self.session.experience.state.preferences, self.session.world
         if (not self.settings.idle_deliberation or not preferences.idle_activity or not self.session.brain.state.enabled
                 or self.session.brain.active or self.session.cognition.active_object or world.destination
                 or any(j["kind"] in {"reply", "memory", "tool", "deliberation"} for j in self.jobs.values())):
             return
         skills = self.computer.memory.skills() if self.computer and self.computer.grant.control else []
-        key, value = idle_context(self.session, skills)
+        screen = None
+        if self.computer and self.computer.grant.observe and self.computer.latest:
+            try:
+                with self.computer.memory.lock:
+                    screen = screen_context(self.computer.latest)
+            except OSError:
+                screen = None
+            if screen and "observed:"+screen["id"] in self.session.cognition.processed:
+                screen = None
+        key, value = idle_context(self.session, skills, screen)
         if key in self.session.cognition.processed:
             return
         cancellation = Cancellation()
@@ -239,6 +289,7 @@ class Runtime(PreviousRuntime):
     def stop(self):
         self._cancel_computer()
         self._cancel_idle()
+        self.session.cognition.pending_computer_task = ""
         if self.computer:
             self.computer.revoke()
         super().stop()

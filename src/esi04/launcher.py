@@ -15,7 +15,7 @@ from esi04.gui import Window
 from esi04.migration import migrate_esi03, validate_save
 from esi04.services import Services
 from esi04.session import Session, inspect_database
-from esi04.setup_assets import prepare_assets
+from esi04.setup_assets import prepare_assets, prepare_vision, vision_missing
 
 
 class Launcher(PreviousLauncher):
@@ -26,6 +26,16 @@ class Launcher(PreviousLauncher):
 
     def __init__(self, root, services_factory=Services, window_factory=Window):
         super().__init__(root, services_factory, window_factory)
+        if not self.preferences.aivis_executable:
+            try:
+                previous = read_preferences(self.root / "data/esi03/launcher.json")
+                if previous.aivis_executable:
+                    self.preferences.aivis_executable = previous.aivis_executable
+                    self.services.preferences = self.preferences.model_dump()
+                    self.save_preferences()
+            except (OSError, ValueError) as exc:
+                self.notify("以前の音声ソフトの選択を引き継げませんでした："+str(exc))
+        self.prepare.setToolTip("会話・音声データは再利用します。画面認識用に追加で約1.55 GBを準備します。")
         self.characters = Characters(self.data / "characters")
         self.refresh_characters()
 
@@ -61,6 +71,8 @@ class Launcher(PreviousLauncher):
             prepare_assets(self.root, settings, self.notify, self.services.cancel)
         else:
             prepare_binaries(self.root, settings, self.notify, self.services.cancel)
+            if vision_missing(self.root):
+                prepare_vision(self.root, self.notify, self.services.cancel)
         self.services.prepare(settings)
         return settings
 

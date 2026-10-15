@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "esi"
-version = "0.3.0"
-description = "ESI-03: experiential learning, personality and autonomous research runtime"
+version = "0.4.0"
+description = "ESI-04: grounded dialogue, embodied agency and learning from demonstrations"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "numpy==2.5.4", "scipy==1.18.1", "pydantic==2.14.1", "PyYAML==6.0.3",
@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gui = ["PySide6==6.12.0"]
+gui = ["PySide6==6.12.0", "python-xlib==0.33; sys_platform == 'linux'"]
 dev = ["pytest==9.1.1", "ruff==0.17.0"]
 live2d = ["live2d-py==1.0.0", "PyOpenGL==3.1.10", "Pillow==12.3.0"]
 
@@ -22,6 +22,7 @@ live2d = ["live2d-py==1.0.0", "PyOpenGL==3.1.10", "Pillow==12.3.0"]
 esi = "esi.cli:main"
 esi-desktop = "esi.desktop:main"
 esi03 = "esi03.__main__:main"
+esi04 = "esi04.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -31,7 +32,10 @@ esi = [
   "resources/*.png", "resources/icons/*.svg",
   "resources/rinne-el/*.json", "resources/rinne-el/*.moc3",
   "resources/rinne-el/rinne-el.2048/*.png",
+  "resources/rinne-el04/*.json", "resources/rinne-el04/*.moc3",
+  "resources/rinne-el04/rinne-el.2048/*.png",
 ]
+esi04 = ["resources/*.ps1"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

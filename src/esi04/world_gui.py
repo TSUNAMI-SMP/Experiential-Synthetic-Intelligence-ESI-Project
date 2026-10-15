@@ -142,6 +142,7 @@ class WorldPanel(PreviousPanel):
         values = {"id": self.selected_id}
         if operation in {"place", "move"}:
             values["position"] = {axis: spin.value() for axis, spin in self.coordinates.items()}
+            values["parent_id"] = self.surface.currentData()
         if operation == "place":
             values.pop("id")
             values.update(kind=self.kind.currentData(), quantity=self.quantity.value(), parent_id=self.surface.currentData())

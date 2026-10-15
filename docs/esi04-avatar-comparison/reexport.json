@@ -1,0 +1,31 @@
+{
+  "editor": "Cubism Editor 5.3.04 FREE",
+  "saved_source_reopened": true,
+  "files": [
+    {
+      "path": "rinne-el.moc3",
+      "identical": true,
+      "sha256": "030a97cfd66993249614b10bf006dd887fee89545128d94b52574bc059a4828a"
+    },
+    {
+      "path": "rinne-el.model3.json",
+      "identical": true,
+      "sha256": "a4bf7be796b69f9dad5a3761f92eb6f53733940cd89f66c9e4a080b3778f3fb9"
+    },
+    {
+      "path": "rinne-el.cdi3.json",
+      "identical": true,
+      "sha256": "ce0b7649de3d102ed00fe2eb312e5f07c46714d11f1fc518446c97148e7db732"
+    },
+    {
+      "path": "rinne-el.physics3.json",
+      "identical": true,
+      "sha256": "850e794f22b70296d7c428ce550a704eb155c71187d3d3a2b1b2e4720de3002f"
+    },
+    {
+      "path": "rinne-el.2048/texture_00.png",
+      "identical": true,
+      "sha256": "125d68c47f88c36bd7a23e8f46cd4a3b83128ae1e1f838654250e248b1839cc5"
+    }
+  ]
+}

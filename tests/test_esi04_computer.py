@@ -161,3 +161,54 @@ def test_unverified_computer_claim_cannot_train_reward(tmp_path):
                                        {"id": "fake", "status": "verified", "before": "a", "after": "b"})
     finally:
         session.close()
+
+
+def test_stale_grant_is_rejected_for_semantic_targets_too(hub):
+    old = hub.latest
+    hub.revoke()
+    hub.configure("test", observe=True, control=True)
+    publish(hub)
+    with pytest.raises(ValueError, match="古く"):
+        hub.act({"kind": "click", "frame_id": old.id, "selector": {"automation_id": "count"}}, Cancellation())
+    assert not hub.native.calls
+
+
+def test_changed_keyboard_focus_is_reobserved_before_typing(hub):
+    first = publish(hub)
+    first.elements[0].focused = True
+    hub.publish(first)
+    second = publish(hub)
+    second.elements[0].focused = True
+    second.elements[0].automation_id = "different-field"
+    hub.publish(second)
+    with pytest.raises(ValueError, match="入力先が変わり"):
+        hub.act({"kind": "type", "frame_id": first.id, "text": "do not misdirect"}, Cancellation())
+    assert not hub.native.calls
+
+
+@pytest.mark.parametrize("goal", ["一度だけクリックして", "このボタンをクリックして"])
+def test_model_cannot_repeat_an_unverified_click(hub, goal):
+    from esi04.computer_agent import ComputerAgent, OperationPlan
+    from esi04.vision import Observation, VisualDescription
+
+    class Screens:
+        def observe(self, settings, frame, question, cancellation):
+            return Observation(id=uid(), frame_id=frame.id, frame_sha256=frame.sha256, question=question,
+                               observed_at=utc(), result=VisualDescription(description="Counter: 1"))
+    def always_click(*args):
+        return OperationPlan(action="click", target="e0", text="", keys=[], amount=0,
+                             expected_target="", expected_value="", summary="クリック")
+    stop = threading.Event()
+    def publishing():
+        while not stop.wait(.04):
+            publish(hub)
+    worker = threading.Thread(target=publishing)
+    worker.start()
+    try:
+        result = ComputerAgent(Settings(), hub, Screens(), decide=always_click).run(goal, Cancellation(), max_steps=3)
+        assert hub.native.counter == 1 and len(result["results"]) == 1
+        assert result["stage"] in {"unverified", "clarify"}
+        assert not result["results"][0]["effect_observed"]
+    finally:
+        stop.set()
+        worker.join(3)

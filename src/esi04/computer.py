@@ -3,6 +3,7 @@
 import hashlib
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,7 +35,21 @@ class ComputerMemory:
         self.limit = limit_mb*1024*1024
         self.lock = threading.RLock()
         self.pinned = set()
+        self.in_use = {}
+        self.deleted_skills = set()
         self.root.mkdir(parents=True, exist_ok=True)
+
+    @contextmanager
+    def pin(self, identifier):
+        with self.lock:
+            self.in_use[identifier] = self.in_use.get(identifier, 0)+1
+        try:
+            yield
+        finally:
+            with self.lock:
+                self.in_use[identifier] -= 1
+                if self.in_use[identifier] == 0:
+                    del self.in_use[identifier]
 
     def frames(self):
         result = []
@@ -71,9 +86,29 @@ class ComputerMemory:
     def save_skill(self, skill):
         with self.lock:
             skill = Skill.model_validate(skill.model_dump())
+            if skill.id in self.deleted_skills:
+                return
             folder = self.root / "skills"
             folder.mkdir(exist_ok=True)
             write_json(folder / (skill.id+".json"), skill.model_dump())
+
+    def delete_skill(self, identifier):
+        with self.lock:
+            skills = self.skills()
+            target = next((s for s in skills if s.id == identifier), None)
+            if target is None:
+                raise ValueError("その実演は見つかりません。")
+            self.deleted_skills.add(identifier)
+            path = self.root / "skills" / (target.id+".json")
+            if path.resolve().parent != (self.root / "skills").resolve():
+                raise ValueError("実演の保存先を確認できません。")
+            path.unlink()
+            retained = {step.anchor_path for skill in skills if skill.id != identifier for step in skill.steps}
+            for step in target.steps:
+                anchor = Path(step.anchor_path)
+                if step.anchor_path and step.anchor_path not in retained and anchor.resolve().parent == (self.root / "anchors").resolve():
+                    anchor.unlink(missing_ok=True)
+            self.prune()
 
     def record(self, kind, record, maximum=256):
         with self.lock:
@@ -85,17 +120,20 @@ class ComputerMemory:
                 path.unlink()
 
     def prune(self, keep=()):
-        protected = set(keep) | self.pinned
+        protected = set(keep) | self.pinned | self.in_use.keys()
         for skill in self.skills():
             protected.update(step.before_frame for step in skill.steps)
             protected.update(step.after_frame for step in skill.steps)
         paths = sorted(self.root.glob("frames/*.png"), key=lambda p: p.stat().st_mtime)
-        total = sum(p.stat().st_size for p in paths)
+        def size(path):
+            metadata = path.with_suffix(".json")
+            return path.stat().st_size+(metadata.stat().st_size if metadata.is_file() else 0)
+        total = sum(size(p) for p in paths)
         for path in paths:
             if total <= self.limit:
                 break
             if path.stem not in protected:
-                total -= path.stat().st_size
+                total -= size(path)
                 path.unlink()
                 path.with_suffix(".json").unlink(missing_ok=True)
         if total > self.limit:
@@ -233,12 +271,7 @@ class ComputerHub:
             raise PermissionError("許可したアプリの外では操作しません。")
         return grant
 
-    def _target(self, action, before):
-        if action.selector:
-            matches = [e for e in before.elements if e.enabled and action.selector.matches(e)]
-            if len(matches) != 1 or matches[0].protected:
-                raise ValueError("操作対象が一つに決まらないか、保護された入力欄です。")
-            return matches[0].bounds.center
+    def _source(self, action, before):
         source = self.recent.get(action.frame_id)
         if source is None:
             path = self.memory.root / "frames" / (action.frame_id+".json")
@@ -248,6 +281,17 @@ class ComputerHub:
             raise ValueError("操作の根拠にした画面が古くなりました。もう一度観察してください。")
         if source.foreground.application != before.foreground.application:
             raise ValueError("操作の対象アプリが違います。")
+        if source.foreground.handle != before.foreground.handle:
+            raise ValueError("操作を考えている間に対象ウィンドウが変わりました。再観察してください。")
+        return source
+
+    def _target(self, action, before):
+        source = self._source(action, before)
+        if action.selector:
+            matches = [e for e in before.elements if e.enabled and action.selector.matches(e)]
+            if len(matches) != 1 or matches[0].protected:
+                raise ValueError("操作対象が一つに決まらないか、保護された入力欄です。")
+            return matches[0].bounds.center
         if source.sha256 == before.sha256 and source.physical == before.physical:
             return before.image_point(*action.point)
         point = source.image_point(*action.point)
@@ -276,13 +320,22 @@ class ComputerHub:
         with self.operation_lock:
             generation = self.grant.generation
             before = self.snapshot(cancellation, generation=generation)
-            target = self._target(action, before) if action.kind in {"click", "double_click", "move"} or action.replace else None
+            source = self._source(action, before)
+            target = self._target(action, before) if action.kind in {"click", "double_click", "move"} or action.selector else None
+            if action.kind in {"type", "key"} and not action.selector:
+                prior_focus = [(e.automation_id or e.name, e.role) for e in source.elements if e.focused]
+                current_focus = [(e.automation_id or e.name, e.role) for e in before.elements if e.focused]
+                if prior_focus != current_focus:
+                    raise ValueError("操作を考えている間に入力先が変わりました。再観察してください。")
             with self.condition:
                 self._check_control(before, generation, cancellation)
                 if target and not before.physical.contains(*target):
                     raise ValueError("選択した画面の外です。")
                 if action.kind in {"type", "key"} and any(e.protected and e.focused for e in before.elements):
                     raise PermissionError("パスワード入力欄への入力は行いません。")
+                if action.kind in {"type", "key"} and any(e.focused and not before.physical.contains(*e.bounds.center)
+                                                          for e in before.elements):
+                    raise PermissionError("入力先が選択した画面の外にあるため止めました。")
                 self.active_cancel = cancellation
                 self.attention = {"generation": generation, "frame_id": before.id, "point": target,
                                   "label": action.selector.name if action.selector else action.kind,
@@ -290,13 +343,14 @@ class ComputerHub:
             try:
                 # Recheck before every character so revocation interrupts even a long text input.
                 if action.kind == "type":
-                    if action.replace:
-                        if not action.selector:
-                            raise ValueError("入力欄を指定してから文章を置き換えてください。")
+                    if action.replace and not action.selector:
+                        raise ValueError("入力欄を指定してから文章を置き換えてください。")
+                    if action.selector:
                         with self.condition:
                             self._check_control(before, generation, cancellation)
                             self.native.click(*target)
-                            self.native.key(["CTRL", "A"])
+                            if action.replace:
+                                self.native.key(["CTRL", "A"])
                     for char in action.text:
                         with self.condition:
                             self._check_control(before, generation, cancellation)
