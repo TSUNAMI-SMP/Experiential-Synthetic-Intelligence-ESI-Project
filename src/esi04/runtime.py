@@ -15,6 +15,7 @@ from esi04.deliberation import context as idle_context
 from esi04.deliberation import deliberate
 from esi04.dialogue import DialogueLLM
 from esi04.games import GamePlayer
+from esi04.plugin_runtime import EnvironmentRuntime
 
 SCREEN_QUERY = re.compile(r"(?:画面|動画|ウィンドウ).*(?:見える|映って|何|どこ|どう|読んで|見て|教えて|説明|ですか|ますか|[？?])|(?:この|今の).*(?:ボタン|アイコン|入力欄).*(?:何|どこ|どう|教えて|ですか|ますか|[？?])")
 SCREEN_TEACHING = re.compile(r"(?:この|今の|画面の).*(?:ボタン|アイコン|入力欄|表示|画面).*(?:は|が|を).+(?:です|だよ|という|っていう|使う|使います)[。！!\s]*$")
@@ -37,7 +38,7 @@ def requested_skill(text, skills):
     return matches[0]
 
 
-class Runtime(PreviousRuntime):
+class Runtime(EnvironmentRuntime, PreviousRuntime):
     def __init__(self, session, *args, computer=None, services=None, **kwargs):
         kwargs.setdefault("llm", DialogueLLM(session.settings))
         super().__init__(session, *args, **kwargs)
@@ -60,6 +61,8 @@ class Runtime(PreviousRuntime):
         self.session.cognition.pending_computer_task = ""
         super()._new_turn(text, source, observation)
         if not self.current:
+            return
+        if self.session.plugins.active_id:
             return
         turn = self.session.turns[self.current["turn_id"]]
         if turn.get("recognition_needs_confirmation") or not turn.get("use_in_dialogue_history", True):
@@ -275,10 +278,14 @@ class Runtime(PreviousRuntime):
         super()._finish_jobs()
 
     def _schedule_memory(self):
-        if not self.computer_task and not self.idle_task:
+        if not self.computer_task and not self.idle_task and not self.environment_task:
             super()._schedule_memory()
 
     def _schedule(self):
+        if self.session.plugins.active_id:
+            self.schedule_environment()
+            AudioRuntime._schedule(self)
+            return
         if self.computer_task and self.services:
             self._status("vision_backend", dict(self.services.vision_backend))
         if self.current and self._is_current(self.current["turn_id"]):

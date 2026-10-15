@@ -12,3 +12,6 @@ models/
 *.wav
 build/
 dist/
+.gradle/
+plugins/minecraft/run*/
+plugins/minecraft/release/mods/

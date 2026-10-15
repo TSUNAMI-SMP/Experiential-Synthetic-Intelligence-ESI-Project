@@ -1,0 +1,21 @@
+{
+  "minecraft": "1.21.11",
+  "java": 21,
+  "tested_fabric_loader": "0.19.5",
+  "files": [
+    {
+      "name": "Carpet 1.4.194",
+      "filename": "fabric-carpet-1.21.11-1.4.194+v251223.jar",
+      "bytes": 1532100,
+      "sha256": "1b4d66f0332bda5deee08755e493c2d6ac64d64d5285e1134aa03604975c2521",
+      "url": "https://cdn.modrinth.com/data/TQTTVgYE/versions/HzPcczDK/fabric-carpet-1.21.11-1.4.194%2Bv251223.jar"
+    },
+    {
+      "name": "Fabric API 0.141.6+1.21.11",
+      "filename": "fabric-api-0.141.6+1.21.11.jar",
+      "bytes": 2426039,
+      "sha256": "bdff7fd7e220085cfad2ff9b1f40dde6534ae0b96cf378f97a374bc54cb9ed0f",
+      "url": "https://cdn.modrinth.com/data/P7dR8mSH/versions/6qAuTtLR/fabric-api-0.141.6%2B1.21.11.jar"
+    }
+  ]
+}

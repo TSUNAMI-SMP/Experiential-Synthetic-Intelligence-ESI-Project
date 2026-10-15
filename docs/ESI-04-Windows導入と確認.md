@@ -1,5 +1,11 @@
 # ESI-04 の導入と確認
 
+## 0.4.4：Minecraftプラグイン
+
+ESIを終了し、更新版ZIPの内側のファイル・フォルダーを、今まで使っていたESIフォルダーへコピーする。`data`、`models`、仮想環境、AivisSpeechを保持する。`ESI-04を起動.cmd` を開き、上部の **ESI-04 0.4.4** を確認する。既存のAIデータの再ダウンロードは不要。
+
+Minecraft連携を使う場合は、[Fabric 1.21.11の導入手順](ESI-04-Minecraft連携.md)に従い、Fabric API・Carpet・同梱のESI Bridge JARをMinecraft側へ追加する。ESIの「プラグイン・Minecraft」タブから接続し、自律活動を開始する。Minecraftを使わない場合は従来どおり起動できる。
+
 ## 0.4.3：画面認識とゲーム操作
 
 ESIを終了し、更新版ZIPの内側のファイル・フォルダーを、今まで使っていたESIフォルダーへコピーする。`data`、`models`、仮想環境、AivisSpeechは保持し、空の別フォルダーで新しいセーブを作らない。`ESI-04を起動.cmd` を実行し、上部の **ESI-04 0.4.3** を確認する。この更新によるAIデータの再ダウンロードは不要。

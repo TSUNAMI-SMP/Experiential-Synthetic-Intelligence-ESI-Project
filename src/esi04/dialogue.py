@@ -8,6 +8,7 @@ from pydantic import Field
 from esi02.grounding import Decision, relevant, render
 from esi03.dialogue import DISCOURSE, PROMPT, Plan, alternate, compact_context, grounded_fact, unknown_topic
 from esi03.dialogue import DialogueLLM as PreviousDialogue
+from esi04.minecraft import answer as environment_answer
 
 
 class ResponsePlan(Plan):
@@ -90,6 +91,8 @@ def intent_of(text, context):
 
 
 def self_desire(context):
+    if context.get("environment", {}).get("active"):
+        return environment_answer("何がしたい？", context["environment"])
     character, world = context.get("character", {}), context.get("virtual_world", {})
     need, body = character.get("needs", {}), world.get("body", {})
     if body.get("hydration", 1) < 0.4:
@@ -107,6 +110,8 @@ def self_desire(context):
 
 
 def comfort(context, metrics=False, text=""):
+    if context.get("environment", {}).get("active"):
+        return environment_answer(text, context["environment"]) or environment_answer("体調はどう？", context["environment"])
     world = context.get("virtual_world", {})
     body, stimulus = world.get("body", {}), world.get("stimulus", {})
     if metrics:
@@ -147,6 +152,15 @@ intent_hintがchatなら、相手の体験の話として受け止める。「�
         def emit(answer, **extra):
             return self._emit_answer(answer, cancellation, on_delta, on_sentence, **(metadata | extra))
         dialogue = context.get("dialogue", {})
+        environment = context.get("environment", {})
+        if dialogue.get("plugin_request"):
+            return emit("Minecraftでの自律活動を停止したよ。" if dialogue["plugin_request"] == "Minecraftでの自律活動を停止した" else
+                        "Minecraftで、そのことを目標にして試してみるね。結果は実際の世界で確かめるよ。"
+                        if environment.get("autonomous") else "目標を覚えたよ。Minecraftの自律活動は今は停止しているよ。", intent="environment")
+        answer = environment_answer(text, environment)
+        if answer:
+            source = (environment.get("observation") or {}).get("id")
+            return emit(answer, intent="environment", grounding={"policy": "game_observation", "refs": [source] if source else []})
         if dialogue.get("computer_stopped"):
             return emit("画面の観察とPC操作を停止したよ。")
         if dialogue.get("screen_error"):

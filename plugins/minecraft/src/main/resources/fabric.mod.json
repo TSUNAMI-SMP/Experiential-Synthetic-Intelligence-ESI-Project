@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "esi_bridge",
+  "version": "${version}",
+  "name": "ESI Minecraft Bridge",
+  "description": "Connects an ESI character to a vanilla-survival fake player via a local authenticated bridge.",
+  "authors": ["ESI Project"],
+  "environment": "*",
+  "entrypoints": {"main": ["org.esi.bridge.EsiBridgeMod"]},
+  "depends": {"fabricloader": ">=0.18.0", "minecraft": "1.21.11", "java": ">=21", "fabric-api": "*", "carpet": ">=1.4.194"}
+}

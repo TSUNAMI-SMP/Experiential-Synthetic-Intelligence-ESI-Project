@@ -67,9 +67,12 @@ class DesktopViews(PreviousViews):
             cognition = session.cognition.model_dump(exclude={"processed", "screen_teachings", "last_screen"})
             cognition["summaries"] = cognition["summaries"][-12:]
             body = session.world.body.model_dump()
+            if session.plugins.active_id:
+                external = session.environment_world().body
+                body.update(energy=external.energy, fatigue=0, hydration=1, condition=external.condition)
             state = {"cognition": cognition, "body": body, "autonomous_motion": preferences.autonomous_motion,
                      "cursor_tracking": preferences.cursor_tracking, "thought_bubbles": preferences.thought_bubbles}
-            obj = next((o for o in session.world.objects if o.id == session.cognition.attention_object), None)
+            obj = next((o for o in session.world.objects if o.id == session.cognition.attention_object), None) if not session.plugins.active_id else None
             if obj:
                 state["gaze"] = (max(-1, min(1, (obj.position.x-session.world.position.x)/3)),
                                  max(-1, min(1, (obj.position.y-1.4)/2)))

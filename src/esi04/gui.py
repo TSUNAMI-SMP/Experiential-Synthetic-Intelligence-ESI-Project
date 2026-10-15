@@ -12,6 +12,7 @@ from esi04.desktop import BUNDLED_MODEL, DesktopViews
 from esi04.growth_gui import GrowthPanel
 from esi04.history_gui import HistoryPanel, choose_recovery
 from esi04.migration import migrate_esi03, validate_save
+from esi04.plugin_gui import PluginPanel
 from esi04.runtime import Runtime
 from esi04.session import Session
 from esi04.world_gui import WorldPanel
@@ -42,9 +43,15 @@ class Window(PreviousWindow):
 
     def __init__(self, *args, **kwargs):
         self.history_panel = None
+        self.plugin_panel = None
         self.computer_supervisor, self.computer_panel, self.computer_scroll = None, None, None
         super().__init__(*args, **kwargs)
         self.setup_computer()
+        self.plugin_panel = PluginPanel(self)
+        self.plugin_scroll = QScrollArea()
+        self.plugin_scroll.setWidgetResizable(True)
+        self.plugin_scroll.setWidget(self.plugin_panel)
+        self.tabs.addTab(self.plugin_scroll, "プラグイン・Minecraft")
         self.history_panel = HistoryPanel(self)
         self.tabs.addTab(self.history_panel, "会話履歴・セーブ")
         self.tabs.currentChanged.connect(lambda index: self.history_panel.reload()
@@ -149,6 +156,14 @@ class Window(PreviousWindow):
 
     def refresh(self):
         super().refresh()
+        if self.plugin_panel:
+            self.plugin_panel.refresh()
+            active = bool(self.session.plugins.active_id)
+            for index in range(self.tabs.count()):
+                if self.tabs.tabText(index) in {"仮想の部屋・身体", "欲求・行動の学習"}:
+                    self.tabs.setTabEnabled(index, not active)
+            if active:
+                self.body_action.setText("生活環境：Minecraft / 仮想の部屋・水分・温度・音の不快は停止")
         if self.computer_panel and isinstance(self.computer_panel, ComputerPanel):
             self.computer_panel.refresh()
             self.computer_panel.runtime_status(self.session.status)

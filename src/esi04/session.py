@@ -18,6 +18,8 @@ from esi04.computer_models import ScreenTeaching
 from esi04.config import Settings
 from esi04.experience import YES, Experience
 from esi04.motivation import Brain
+from esi04.plugin_session import EnvironmentSession
+from esi04.plugins import PluginState
 from esi04.state import Cognition, ExperienceState, Preferences
 from esi04.vision import Observation as ScreenObservation
 from esi04.world import World, scene_command
@@ -28,9 +30,10 @@ class SavedState(PreviousSavedState):
     world: World
     experience: ExperienceState
     cognition: Cognition = Field(default_factory=Cognition)
+    plugins: PluginState = Field(default_factory=PluginState)
 
 
-class Session(PreviousSession):
+class Session(EnvironmentSession, PreviousSession):
     release_name = "ESI-04"
     settings_class, state_class = Settings, SavedState
     world_class, experience_class, brain_class = World, Experience, Brain
@@ -40,8 +43,12 @@ class Session(PreviousSession):
 
     def __init__(self, *args, **kwargs):
         self.cognition = Cognition()
+        self.plugins = PluginState()
         self._history_ready = False
         super().__init__(*args, **kwargs)
+        self.plugins.autonomous = False
+        if self.plugins.active_id:
+            self.experience.advance(self.environment_world(), 0)
 
     def _write(self, events=()):
         with self.store.lock, self.store.db:
@@ -83,6 +90,7 @@ class Session(PreviousSession):
 
     def restore_additional(self, state):
         self.cognition = state.cognition.model_copy(deep=True)
+        self.plugins = state.plugins.model_copy(deep=True)
         self.cognition.pending_computer_task = ""  # Interrupted real-PC requests never resume on a new grant.
 
     def _remember(self, turn):
@@ -90,7 +98,7 @@ class Session(PreviousSession):
         if turn.get("recognition_needs_confirmation") or not turn.get("use_in_dialogue_history", True):
             return
         text = turn["input"]
-        command = scene_command(text, self.world)
+        command = scene_command(text, self.world) if not self.plugins.active_id else None
         if command:
             if command.get("error"):
                 turn["scene_result"] = {"error": command["error"]}
@@ -117,6 +125,8 @@ class Session(PreviousSession):
 
     @atomic
     def scene_operation(self, operation, values, source_id=None):
+        if self.plugins.active_id:
+            raise ValueError("Minecraft連携中は仮想空間の活動を停止しています。")
         source_id = source_id or "ui:"+uid()
         self.store.db.execute("CREATE TABLE IF NOT EXISTS esi04_scene_effects (source_id TEXT PRIMARY KEY)")
         if self.store.db.execute("SELECT 1 FROM esi04_scene_effects WHERE source_id=?", (source_id,)).fetchone():
@@ -148,6 +158,9 @@ class Session(PreviousSession):
     @atomic
     def advance_world(self, seconds, conversing=False, autonomy=False, allow_requests=False):
         with self.lock:
+            if self.plugins.active_id:
+                self.advance_plugin_clock(seconds, conversing)
+                return
             self.world.conversation_active = conversing
             self.world.advance(seconds)
             self.experience.advance(self.world, seconds)
@@ -161,7 +174,7 @@ class Session(PreviousSession):
         with self.lock:
             context = super().dialogue_context(query)
             character = self.experience.context()
-            candidate = self.experience.question_candidate(self.world)
+            candidate = self.experience.question_candidate(self.environment_world())
             character["allow_followup"] = bool(candidate)
             character["askable_interests"] = [candidate["interest"].model_dump()] if candidate else []
             current = next(reversed(self.turns.values()), {})
@@ -176,7 +189,11 @@ class Session(PreviousSession):
                                      "screen_teachings": self.screen_recall(query),
                                      "computer_request": current.get("computer_request"),
                                      "computer_stopped": current.get("computer_stopped", False),
+                                     "plugin_request": current.get("plugin_request"),
                                      "computer_available": self.status.get("computer_access", False)})
+            context["environment"] = self.environment_context()
+            if self.plugins.active_id:
+                context["virtual_world"] = {"enabled": False, "body": {}, "stimulus": {}, "objects": []}
             return context
 
     @atomic
