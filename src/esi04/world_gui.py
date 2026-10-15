@@ -151,7 +151,7 @@ class WorldPanel(PreviousPanel):
         super().refresh(world)
         if not hasattr(self, "objects"):
             return
-        signature = (id(self.window.session), world.get("revision"))
+        signature = (id(self.window.session), world.get("revision"), world.get("discoveries"))
         if signature == self.object_signature:
             return
         self.object_signature = signature

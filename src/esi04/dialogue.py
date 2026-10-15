@@ -54,6 +54,10 @@ def compact(context):
 
 
 def intent_of(text, context):
+    if re.fullmatch(r"(?:こんにちは|こんばんは|おはよう|やあ|ただいま|おかえり|ありがとう)(?:ございます|ね)?[。！!\s]*", text):
+        return "greeting"
+    if re.search(r"(?:今|いま|何を|何|なに).*(?:考えて|考え中|してる|している)|気持ちは|どんな気持ち", text):
+        return "self_activity"
     query = bool(re.search(r"[？?]|ですか|ますか|ある|どう|どんな|何|なに|教えて", text))
     if re.search(r"(?:何か|何が|何を|なにか|なにが).*(?:欲しい|ほしい|したい)|欲しいもの|やりたいこと|成長の目標", text):
         return "self_desire"
@@ -69,7 +73,7 @@ def intent_of(text, context):
         return "recognition_problem"
     if re.search(r"(?:調べ|検索|学|確かめ|試し).*(?:方が|ほうが|良い|いい|してみて|すると|できるよ)|(?:ネット|検索|見比べ).*(?:方法|手段|良い|いい)", text):
         return "proposal"
-    if context.get("dialogue", {}).get("reply_link", {}).get("relation") in {"answered", "uncertain", "deferred", "declined"}:
+    if context.get("dialogue", {}).get("reply_link", {}).get("relation") in {"answered", "uncertain", "deferred", "declined", "clarification_rejected"}:
         return "answer"
     if re.search(r"(?:あなた|君|きみ|AI|ESI|エル).*(?:名前|誰|なまえ)|名前.*(?:あなた|君)", text):
         return "identity"
@@ -80,7 +84,7 @@ def intent_of(text, context):
     items = [m for m in context.get("knowledge", [])+context.get("memories", []) if relevant(m, text)]
     if items:
         return "teaching" if any(m.get("source_turn_id") == context.get("current_turn_id") for m in items) else "recall"
-    if re.search(r"とは|って何|は何|どこ|誰|意味|について.*(?:教えて|説明)|を知って|知ってる", text):
+    if re.search(r"とは|って何|は何|どこ|誰|意味|について.*(?:教えて|説明)|を知って|知ってる|[？?]$", text):
         return "unknown"
     return "chat"
 
@@ -139,13 +143,42 @@ opening/reflectionは短い相づち、気になる・試してみたい・迷�
                     "request": {"knowledge_policy": "experience_only_v3"}}
         def emit(answer, **extra):
             return self._emit_answer(answer, cancellation, on_delta, on_sentence, **(metadata | extra))
+        dialogue = context.get("dialogue", {})
+        if dialogue.get("screen_error"):
+            return emit("今の画面を読み取れなかったよ。"+dialogue["screen_error"], intent="screen_error")
+        if dialogue.get("screen"):
+            observation = dialogue["screen"]
+            result = observation["result"]
+            words = result.get("visible_text", [])[:8]
+            answer = "画面では、"+"、".join(f"「{w[:100]}」" for w in words)+"という文字が見えるよ。" if words else "画像からは、"+result["description"][:900]
+            if result.get("uncertain"):
+                answer += "細かい部分はまだ確信がないので、一緒に確かめたいな。"
+            return emit(answer, intent="screen", grounding={"policy": "visual_inference", "refs": [observation["id"]]})
+        if dialogue.get("computer_request"):
+            return emit("画面を確かめながら操作してみるね。途中で対象や結果が分からなくなったら止まるよ。" if dialogue.get("computer_available")
+                        else "PC操作は今は停止しているよ。画面・PC操作タブで許可すると、画面を確かめながら試せるよ。", intent="computer")
+        if intent == "greeting":
+            return emit("おはよう。今日は何をして過ごす？" if "おはよう" in text else "おかえり。話せるときに続きを聞きたいな。" if "ただいま" in text
+                        else "うん、こちらこそ。" if "ありがとう" in text else "こんばんは。今は落ち着いて話せるよ。" if "こんばんは" in text else "こんにちは。話を聞いているよ。")
+        if intent == "self_activity":
+            cognition = dialogue.get("cognition", {})
+            summaries = cognition.get("summaries", [])
+            if summaries:
+                summary = summaries[-1]
+                return emit(f"今は「{summary['subject']}」について、{summary['activity']}ところだよ。"+summary["reason"][:180])
+            return emit("今は、次に何を知ったり試したりしたいか考えているよ。")
         if context.get("dialogue", {}).get("scene_result"):
             result = context["dialogue"]["scene_result"]
             if result.get("error"):
                 return emit(result["error"], intent="scene_command")
             obj = result.get("object")
+            operation = result.get("operation", "place")
             if obj:
-                return emit(f"「{obj['label']}」を空間に置いたよ。実際に見に行って確かめられるね。", intent="scene_command")
+                phrase = {"place": "空間に置いた", "move": "移動した", "remove": "取り除いた", "eat": "一個食べた",
+                          "inspect": "近くで確かめた", "use": "使った", "play": "使って遊んだ"}.get(operation, "操作した")
+                return emit(f"「{obj['label']}」を{phrase}よ。", intent="scene_command")
+            if operation == "remove":
+                return emit("指定した物を空間から取り除いたよ。", intent="scene_command")
         if intent == "metrics":
             return emit(comfort(context, True, text))
         if intent == "comfort":
@@ -183,6 +216,8 @@ opening/reflectionは短い相づち、気になる・試してみたい・迷�
                 return emit("分かった。今は待って、自分でできることを考えているね。")
             if relation == "declined":
                 return emit("分かった。その質問はここで保留にするね。")
+            if relation == "clarification_rejected":
+                return emit("分かった。今の発言は、別の話として受け取るね。")
             return emit("教えてくれてありがとう。さっき気になって尋ねたことへの答えとして覚えておくね。")
         if intent == "unknown":
             return emit(alternate(("そのことはまだ知らない。教えてもらえる？", "まだ自分では説明できない。知っていきたいな。"), history), unknown_topic=unknown_topic(text))
@@ -193,6 +228,11 @@ opening/reflectionは短い相づち、気になる・試してみたい・迷�
         context["intent_hint"] = intent
         plan, model = self._plan(text, history, cancellation, context, fallback) if self.settings.natural_dialogue else (fallback, {})
         metadata.update(model)
+        pending = character.get("pending_question")
+        if (pending and plan.answer_to == pending["id"] and plan.intent == "answer"
+                and link.get("relation") == "other" and not re.search(r"[？?]|教えて|何|どこ|誰", text)):
+            return emit("今の言葉は、さっき私が尋ねたことへの答え、という受け取り方で合っている？",
+                        question_binding={"question_id": pending["id"], "relation": "uncertain", "quote": text})
         # Model interpretation may refine ambiguous chat, but never fabricate facts.
         if intent == "chat" and plan.intent in {"self_desire", "self_interest", "comfort"}:
             return emit(comfort(context) if plan.intent == "comfort" else self_desire(context), intent=plan.intent)

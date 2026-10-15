@@ -12,4 +12,6 @@ def bundled_model_path():
 def model_file(selection):
     if selection == BUNDLED_MODEL:
         return bundled_model_path()
+    if selection == "builtin:rinne-el04":
+        return Path(__file__).resolve().parents[1] / "esi/resources/rinne-el04/rinne-el.model3.json"
     return Path(selection) if selection else None

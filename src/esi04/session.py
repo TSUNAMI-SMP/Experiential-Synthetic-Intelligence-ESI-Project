@@ -12,10 +12,12 @@ from esi03.session import Session as PreviousSession
 from esi03.storage import atomic
 from esi04.agency import Agency
 from esi04.beliefs import Beliefs
+from esi04.computer_models import ScreenTeaching
 from esi04.config import Settings
 from esi04.experience import YES, Experience
 from esi04.motivation import Brain
 from esi04.state import Cognition, ExperienceState, Preferences
+from esi04.vision import Observation as ScreenObservation
 from esi04.world import World, scene_command
 
 
@@ -126,11 +128,85 @@ class Session(PreviousSession):
             character["allow_followup"] = bool(candidate)
             character["askable_interests"] = [candidate["interest"].model_dump()] if candidate else []
             current = next(reversed(self.turns.values()), {})
+            cognition = self.cognition.model_dump(exclude={"processed", "screen_teachings", "last_screen"})
+            cognition["summaries"] = cognition["summaries"][-2:]
             context.update(character=character, virtual_world=self.world.context(),
                            dialogue={"reply_link": current.get("question_reply", {}),
                                      "scene_result": current.get("scene_result"),
-                                     "cognition": self.cognition.model_dump(exclude={"processed"})})
+                                     "cognition": cognition,
+                                     "screen": current.get("screen_observation"),
+                                     "screen_error": current.get("screen_error"),
+                                     "computer_request": current.get("computer_request"),
+                                     "computer_available": self.status.get("computer_access", False)})
             return context
+
+    @atomic
+    def screen_observed(self, result, turn_id=None):
+        observation = ScreenObservation.model_validate(result["observation"])
+        self.cognition.last_screen = observation
+        self.cognition.intention = "inspect"
+        self.cognition.attention = "共有された画面"
+        self.cognition.emotion, self.cognition.emotion_strength = "interested", 0.65
+        if turn_id:
+            self.turns[turn_id]["screen_observation"] = observation.model_dump()
+        self.agency.summarize("画面を観察", observation.question, "許可された画面の画像を読み取った",
+                              [observation.frame_id, observation.id], outcome=observation.result.description[:400],
+                              certainty="inferred")
+        self._write([("screen_observation", observation.model_dump())])
+
+    @atomic
+    def screen_taught(self, value):
+        entry = ScreenTeaching.model_validate(value)
+        if any(i.id == entry.id for i in self.cognition.screen_teachings):
+            return
+        self.cognition.screen_teachings = (self.cognition.screen_teachings+[entry])[-64:]
+        self.agency.summarize("画面の説明を教わる", entry.user_text[:160], "相手の説明と、その時の画像を対応付けた",
+                              [entry.id, entry.frame_id], outcome="相手から教わった説明として保持", certainty="observed")
+        self._write([("screen_teaching", entry.model_dump())])
+
+    @atomic
+    def apply_focus(self, key, plan):
+        if key in self.cognition.processed:
+            return False
+        self.agency.remember_processed(key)
+        self.cognition.deliberations += 1
+        self.cognition.emotion = plan.emotion
+        self.cognition.intention = "think"
+        self.agency.summarize("次の活動を考える", plan.action, plan.reason, [plan.target_id] if plan.target_id else [],
+                              alternatives=plan.alternatives, certainty="inferred")
+        if plan.action == "inspect":
+            obj = next((o for o in self.world.objects if o.id == plan.target_id and o.discovered and o.quantity > 0), None)
+            if obj and not self.brain.active and not self.cognition.active_object:
+                self.cognition.active_object, self.cognition.object_action = obj.id, "inspect"
+                self.cognition.object_started = self.world.elapsed
+                self.cognition.attention_object, self.cognition.attention = obj.id, obj.label
+                self.cognition.intention = "inspect"
+        elif plan.action == "ask":
+            interest = next((i for i in self.experience.state.interests if i.id == plan.target_id), None)
+            if interest and self.experience.state.availability != "busy":
+                interest.priority = max(0.95, interest.priority)
+                self.brain.state.next_decision = self.world.elapsed
+        elif plan.action == "rest" and not self.brain.active:
+            self.brain._begin(self.world, "rest", False)
+            self.cognition.intention = "rest"
+        self._write([("idle_decision", {"context": key, "plan": plan.model_dump(), "is_factual_evidence": False})])
+        return True
+
+    @atomic
+    def computer_finished(self, result):
+        self.cognition.computer_result = str(result.get("summary", ""))[:1000]
+        self.cognition.pending_computer_task = ""
+        self.cognition.intention = "think"
+        self.agency.summarize("PC操作の結果を確認", str(result.get("goal", "実演の再現")),
+                              "入力後の画面と、達成条件の確認を区別した", outcome=self.cognition.computer_result,
+                              evidence=[r["id"] for r in result.get("results", [])][-8:],
+                              certainty="observed" if result.get("stage") == "verified" else "inferred")
+        # No reward for a language-model declaration or an unverified screen change.
+        for record in result.get("results", []):
+            if record.get("status") == "verified" and record.get("effect_observed"):
+                self.experience.outcome("computer:"+record["id"], "explore", 0.1,
+                                        "computer_observation", record["id"], record)
+        self._write([("computer_result", result)])
 
     @atomic
     def dialogue_result(self, turn_id, result):
@@ -138,6 +214,15 @@ class Session(PreviousSession):
         if turn.get("experience_processed"):
             return
         result = copy.deepcopy(result)
+        binding = result.pop("question_binding", None)
+        pending = self.experience.pending_question()
+        if (binding and pending and binding.get("question_id") == pending.id
+                and binding.get("relation") == "uncertain" and binding.get("quote") == turn["input"]
+                and not turn.get("recognition_needs_confirmation") and turn.get("use_in_dialogue_history", True)):
+            relation = {**binding, "source_turn": turn_id}
+            turn["question_reply"] = relation
+            self.experience.apply_reply(turn, relation)
+            self._persist(turn)
         interest_id = result.pop("asked_interest", None)
         followup = result.pop("asked_followup", False)
         super().dialogue_result(turn_id, result)

@@ -7,6 +7,8 @@ from pydantic import Field
 from esi02.world import Model
 from esi03.personality import Preferences as PreviousPreferences
 from esi03.personality import State as PreviousState
+from esi04.computer_models import ScreenTeaching
+from esi04.vision import Observation as ScreenObservation
 
 
 class Preferences(PreviousPreferences):
@@ -66,3 +68,6 @@ class Cognition(Model):
     processed_revision: int = Field(default=-1, ge=-1)
     deliberations: int = Field(default=0, ge=0)
     pending_computer_task: str = Field(default="", max_length=1000)
+    last_screen: ScreenObservation | None = None
+    screen_teachings: list[ScreenTeaching] = Field(default_factory=list, max_length=64)
+    computer_result: str = Field(default="", max_length=1000)

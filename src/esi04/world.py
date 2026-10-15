@@ -61,6 +61,13 @@ class World(PreviousWorld):
         if len(lookup) != len(self.objects):
             raise ValueError("空間内の物体IDが重複しています。")
         for item in self.objects:
+            width, depth, height = item.size
+            if (item.position.x-width/2 < 0 or item.position.x+width/2 > 6
+                    or item.position.z-depth/2 < 0 or item.position.z+depth/2 > 5
+                    or item.position.y+height > 3):
+                raise ValueError("物体が部屋の壁・天井からはみ出しています。")
+            if item.kind in {"desk", "chair", "bed"} and item.position.y != 0:
+                raise ValueError("この家具は床に置いてください。")
             if item.parent_id:
                 parent = lookup.get(item.parent_id)
                 if parent is None or parent.kind != "desk" or parent.parent_id:
@@ -70,6 +77,14 @@ class World(PreviousWorld):
                 dx, dz = abs(item.position.x-parent.position.x), abs(item.position.z-parent.position.z)
                 if dx > parent.size[0]/2 or dz > parent.size[1]/2:
                     raise ValueError("机の上の物の位置が机から外れています。")
+                if abs(item.position.y-parent.position.y-parent.size[2]) > 0.01:
+                    raise ValueError("机に載せる物の高さが合っていません。")
+        solids = [o for o in self.objects if o.solid]
+        for index, first in enumerate(solids):
+            for second in solids[index+1:]:
+                if (abs(first.position.x-second.position.x) < (first.size[0]+second.size[0])/2
+                        and abs(first.position.z-second.position.z) < (first.size[1]+second.size[1])/2):
+                    raise ValueError("家具どうしが重なっています。位置を少し離してください。")
         if any(p.y != 0 for p in self.path):
             raise ValueError("移動経路は床の上にしてください。")
         return self
@@ -94,9 +109,12 @@ class World(PreviousWorld):
 
     def near(self, place, radius=0.8):
         item = next((o for o in self.objects if o.id == place and o.quantity > 0), None)
-        return bool(item and math.hypot(self.position.x-item.position.x, self.position.z-item.position.z) <= radius)
+        return bool(item and (radius > 1 or item.position.y <= 1.7)
+                    and math.hypot(self.position.x-item.position.x, self.position.z-item.position.z) <= radius)
 
     def approach(self, item):
+        if item.position.y > 1.7:
+            raise ValueError("その高さには手が届きません。低い場所か机の上へ移動してください。")
         candidates = [Point(x=i/4, z=j/4) for i in range(1, 24) for j in range(1, 20)
                       if self.free(i/4, j/4) and math.hypot(i/4-item.position.x, j/4-item.position.z) <= 0.8]
         if not candidates:
@@ -190,11 +208,16 @@ class World(PreviousWorld):
                 data["objects"] = [o for o in data["objects"] if o["id"] != item_id and o["parent_id"] != item_id]
             else:
                 point = Point.model_validate(values["position"])
+                parent_id = values.get("parent_id", item.parent_id)
+                if parent_id:
+                    point.y = self.get(parent_id).position.y+self.get(parent_id).size[2]
                 delta = {axis: getattr(point, axis)-getattr(item.position, axis) for axis in "xyz"}
                 for obj in data["objects"]:
                     if obj["id"] == item_id or obj["parent_id"] == item_id:
                         obj["position"] = {a: obj["position"][a]+delta[a] for a in "xyz"}
                         obj.update(revision=obj["revision"]+1, discovered=False, last_source=source_id)
+                        if obj["id"] == item_id:
+                            obj["parent_id"] = parent_id
         elif operation in {"inspect", "eat", "use", "play"}:
             item = self.get(item_id)
             if not self.near(item_id, 0.9):
@@ -243,7 +266,7 @@ class World(PreviousWorld):
     def context(self):
         value = super().context()
         value.update(objects=[o.model_dump() for o in self.objects], revision=self.revision,
-                     path=[p.model_dump() for p in self.path])
+                     discoveries=self.discoveries, path=[p.model_dump() for p in self.path])
         return value
 
 
@@ -253,9 +276,42 @@ ALIASES = {"お菓子": "snack", "クッキー": "snack", "おやつ": "snack", 
 
 
 def scene_command(text, world):
-    """Only explicit placement requests cause mutations; hypothetical teaching never does."""
+    """Explicit room instructions only; hypothetical teaching never mutates the scene."""
     if re.search(r"できる|例えば|仮に|もし|したら|すると|場合|という|っていう", text):
         return None
+    def find(label):
+        label = label.strip("「」 \t")
+        matches = [o for o in world.objects if o.quantity > 0 and
+                   (o.id == label or o.label == label or o.kind == ALIASES.get(label))]
+        if len(matches) != 1:
+            raise ValueError("どの物体か一つに決められないので、部屋の一覧で選んでもらえる？")
+        return matches[0]
+    remove = re.fullmatch(r"(.{1,64}?)を(?:取り除いて|撤去して|片付けて|消して)(?:ください|ね)?[。！!\s]*", text)
+    movement = re.fullmatch(r"(.{1,64}?)を(.{1,80}?)に(?:移動して|動かして)(?:ください|ね)?[。！!\s]*", text)
+    if remove or movement:
+        try:
+            item = find((remove or movement).group(1))
+            if remove:
+                return {"operation": "remove", "values": {"id": item.id}}
+            target = movement.group(2)
+            values = {"id": item.id, "position": item.position.model_dump()}
+            if target in {"机の上", "デスクの上"}:
+                parent = find("机")
+                values.update(position=parent.position.model_dump(), parent_id=parent.id)
+            elif target in {"床", "床の上"}:
+                values["position"]["y"] = 0.0
+                values["parent_id"] = None
+            elif target in {"右", "左", "奥", "手前"}:
+                axis, amount = {"右": ("x", 0.5), "左": ("x", -0.5), "奥": ("z", -0.5), "手前": ("z", 0.5)}[target]
+                values["position"][axis] += amount
+            else:
+                coordinates = re.fullmatch(r"[（(]?\s*(\d(?:\.\d+)?)\s*[,、]\s*(\d(?:\.\d+)?)\s*[,、]\s*(\d(?:\.\d+)?)\s*[)）]?", target)
+                if not coordinates:
+                    return {"error": "移動先は、右・左・奥・手前・床・机の上、または（x,y,z）の座標で指定してもらえる？"}
+                values.update(position=dict(zip("xyz", map(float, coordinates.groups()), strict=True)), parent_id=None)
+            return {"operation": "move", "values": values}
+        except ValueError as exc:
+            return {"error": str(exc)}
     match = re.fullmatch(r"(?:仮想(?:の)?(?:空間|部屋)(?:に|で))?(?:(机|デスク)の上に)?(.{1,30}?)(?:を|は)(\d{1,2}|[一二三四五])?(?:個|つ|台|冊)?(?:置いて|置く|配置して)(?:ください|くれる|ね)?[。！!？?\s]*", text)
     if not match:
         return None
@@ -273,5 +329,21 @@ def scene_command(text, world):
     else:
         p = world.position
         position, parent_id = {"x": min(5.5, p.x+0.7), "y": 0.0, "z": p.z}, None
+        if kind in {"desk", "chair", "bed"}:
+            positions = sorted((Point(x=i/2, z=j/2) for i in range(1, 12) for j in range(1, 10)),
+                               key=world.position.distance)
+            position = None
+            for point in positions:
+                data = world.model_dump()
+                data["objects"].append(Object(id=uid(), kind=kind, label=label, position=point).model_dump())
+                try:
+                    candidate = type(world).model_validate(data)
+                    if candidate.free(world.position.x, world.position.z):
+                        position = point.model_dump()
+                        break
+                except ValueError:
+                    continue
+            if position is None:
+                return {"error": "この家具を置ける空き場所を見つけられないので、部屋の配置を調整してもらえる？"}
     return {"operation": "place", "values": {"kind": kind, "label": label, "quantity": quantity,
                                                "position": position, "parent_id": parent_id}}

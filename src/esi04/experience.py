@@ -43,8 +43,18 @@ def reply_relation(text, question):
 
 
 class Experience(PreviousExperience):
+    outcome_sources = PreviousExperience.outcome_sources | {"computer_observation"}
     state_class = ExperienceState
     initial_question_delay = 0
+
+    def outcome(self, identifier, activity, reward, provenance, source_id, details=None):
+        if provenance == "computer_observation" and (
+            not isinstance(details, dict) or details.get("id") != source_id
+            or details.get("status") != "verified" or not details.get("after") or not details.get("effect_observed")
+            or details.get("before") == details.get("after")
+        ):
+            raise ValueError("PC操作の報酬には、実行後に確認した結果が必要です。")
+        return super().outcome(identifier, activity, reward, provenance, source_id, details)
 
     def context_signature(self, interest):
         # Passage of a fixed interval is not new evidence to repeat a question.
@@ -106,6 +116,9 @@ class Experience(PreviousExperience):
         if question.stage == "uncertain" and YES.fullmatch(turn["input"].strip()):
             return {"question_id": question.id, "relation": "answered", "quote": question.reply_quote,
                     "source_turn": question.reply_turn, "confirmed_by": turn["id"]}
+        if question.stage == "uncertain" and NO.fullmatch(turn["input"].strip()):
+            return {"question_id": question.id, "relation": "clarification_rejected", "quote": turn["input"],
+                    "source_turn": turn["id"]}
         return {"question_id": question.id, "relation": relation, "quote": turn["input"],
                 "source_turn": turn["id"]}
 
@@ -116,6 +129,12 @@ class Experience(PreviousExperience):
         if question.stage not in {"pending", "uncertain", "unobserved"}:
             return None
         stage = relation["relation"]
+        if stage == "clarification_rejected":
+            question.stage = "pending"
+            question.reply_turn, question.reply_quote = None, ""
+            self.trace("question_reply", "別の発言として受け取り、質問への回答にはしなかった", turn["id"],
+                       question_id=question.id, relation=stage)
+            return question
         question.stage = stage
         question.reply_turn, question.reply_quote = relation["source_turn"], relation["quote"]
         interest = next((i for i in self.state.interests if i.id == question.interest_id), None)
@@ -149,7 +168,7 @@ class Experience(PreviousExperience):
 
     def finish_question(self, action_id, stage, source_id):
         question = next((q for q in self.state.dialogue_questions if q.action_id == action_id
-                         and q.stage == "pending"), None)
+                         and q.stage in {"pending", "uncertain"}), None)
         if stage not in {"unknown", "cancelled", "declined"}:
             return
         if question:

@@ -10,6 +10,7 @@ from esi03.personality import Goal, Interest, Needs, State, Trace
 
 
 class Experience:
+    outcome_sources = {"explicit_user_response", "virtual_world_observation", "retrieved_document"}
     state_class = State
     initial_question_delay = 30
 
@@ -138,7 +139,7 @@ class Experience:
         mod.reward_prediction_error *= math.exp(-seconds / 30)
 
     def outcome(self, identifier, activity, reward, provenance, source_id, details=None):
-        if provenance not in {"explicit_user_response", "virtual_world_observation", "retrieved_document"}:
+        if provenance not in self.outcome_sources:
             raise ValueError("生成した文章は報酬や学習結果にできません。")
         if activity not in self.state.habits or not math.isfinite(reward) or not -1 <= reward <= 1:
             raise ValueError("観測された活動と報酬の範囲が正しくありません。")
