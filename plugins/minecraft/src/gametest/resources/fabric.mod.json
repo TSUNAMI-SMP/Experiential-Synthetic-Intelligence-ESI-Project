@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "id": "esi_bridge_test",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "name": "ESI Bridge gameplay checks",
   "environment": "*",
-  "entrypoints": {"fabric-gametest": ["org.esi.bridge.BridgeGameTest", "org.esi.bridge.HttpGameTest"]},
+  "entrypoints": {"fabric-gametest": ["org.esi.bridge.BridgeGameTest", "org.esi.bridge.HttpGameTest", "org.esi.bridge.WorkstationGameTest"]},
   "depends": {"esi_bridge": "*", "fabric-gametest-api-v1": "*"}
 }

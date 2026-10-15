@@ -47,6 +47,10 @@ class Session(EnvironmentSession, PreviousSession):
         self._history_ready = False
         super().__init__(*args, **kwargs)
         self.plugins.autonomous = False
+        self.plugins.learning.pending = None
+        if self.plugins.learning.plan.stage == "running":
+            self.plugins.learning.plan.stage = "unobserved"
+            self.plugins.learning.plan.review = "再起動で中断した操作の結果は未確認。再接続後に観察し直す。"
         if self.plugins.active_id:
             self.experience.advance(self.environment_world(), 0)
 

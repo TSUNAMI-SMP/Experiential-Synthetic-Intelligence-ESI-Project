@@ -50,6 +50,7 @@ public final class Bridge implements AutoCloseable {
     private final LinkedHashMap<String, Map<String, Object>> accepted = new LinkedHashMap<>();
     private Map<String, Object> result = new LinkedHashMap<>();
     private Operation operation;
+    private final Workstation workstation = new Workstation();
     public Bridge(MinecraftServer server) { this.server = server; }
     static String randomCode() {
         byte[] bytes = new byte[24]; new SecureRandom().nextBytes(bytes);
@@ -142,13 +143,15 @@ public final class Bridge implements AutoCloseable {
     public Map<String, Object> state() {
         if (bot == null) throw new IllegalStateException("ESIが参加していません。");
         String id = sessionId+":"+(sequence++);
-        Sense.View view = Sense.observe(bot, id); views.put(id, view);
+        Sense.View view = Sense.observe(bot, id, workstation); views.put(id, view);
         while (views.size() > 128) views.remove(views.keySet().iterator().next());
         Map<String, Object> value = new LinkedHashMap<>();
         value.put("protocol", 1); value.put("id", id); value.put("plugin_id", "minecraft.fabric");
         value.put("world_id", worldId); value.put("session_id", sessionId); value.put("tick", server.getTickCount());
         value.put("actor", view.actor()); value.put("inventory", view.inventory());
         value.put("targets", view.targets()); value.put("action", new LinkedHashMap<>(result));
+        value.put("recipes",view.recipes()); value.put("container",view.container());
+        value.put("crafting_grid",workstation.grid(bot));
         value.put("events", bot.isDeadOrDying() || bot.isRemoved() ? List.of("ESIが死亡または退出した。") : List.of());
         value.put("basis", "game_observation"); return value;
     }
@@ -169,9 +172,13 @@ public final class Bridge implements AutoCloseable {
         if (!targetId.isEmpty() && target == null) throw new IllegalArgumentException("観察にない対象は操作できません。");
         int ticks = (int) number(request, "ticks", 20);
         if (ticks < 1 || ticks > 200) throw new IllegalArgumentException("操作時間は1〜200tickです。");
-        stop("次の操作へ切り替えた");
+        int requestedSlot = (int) bounded(request,"slot",0,0,35);
+        if (operation!=null) finish("stopped","次の操作へ切り替えた",false);
+        else pack().stopAll();
+        if (!Set.of("craft","deposit","withdraw","close_container","look","use").contains(kind)) workstation.close(bot);
         operation = new Operation(requestId, kind, target, server.getTickCount()+ticks, bot.position(),
             bot.getFoodData().getFoodLevel(), bot.getFoodData().getSaturationLevel());
+        operation.before = Sense.frame(bot,target,requestedSlot);
         result = new LinkedHashMap<>(Map.of("request_id", requestId, "kind", kind, "stage", "running",
             "changed", false, "detail", "操作を開始した", "before_observation", observationId));
         try {
@@ -189,7 +196,7 @@ public final class Bridge implements AutoCloseable {
                     if (flag(request, "jump")) pack().start(ActionType.JUMP, Action.continuous());
                 }
                 case "go_to" -> {
-                    requireTarget(target); operation.path = Walking.path(bot, target.position());
+                    requireTarget(target); operation.path = Walking.path(bot, target.position(),target.kind().equals("block"));
                     if (operation.path.isEmpty()) {
                         if (bot.blockPosition().distManhattan(BlockPos.containing(target.position()))<=1)
                             finish("completed", "すでに対象のすぐ近くにいる", false);
@@ -219,6 +226,17 @@ public final class Bridge implements AutoCloseable {
                     if (kind.equals("place")) select(slot(request));
                     pack().start(ActionType.USE, Action.once());
                 }
+                case "craft" -> {
+                    workstation.craft(bot,request,view);
+                    finish("completed","通常のクラフトで完成品を所持品へ移した。材料と完成品は前後の所持品で確認する",true);
+                }
+                case "deposit", "withdraw" -> {
+                    var before=Sense.inventory(bot);
+                    workstation.transfer(bot,request,view,kind.equals("deposit"));
+                    boolean changed=!before.equals(Sense.inventory(bot));
+                    finish(changed?"completed":"failed",changed?"収納と所持品の間でアイテムを移した":"移動できなかった。空きや取り出し条件を確認する",changed);
+                }
+                case "close_container" -> { workstation.close(bot); finish("completed","収納・作業画面を閉じた",true); }
                 case "attack" -> {
                     requireTarget(target); Entity entity = bot.level().getEntity(target.entity());
                     if (entity == null || entity instanceof ServerPlayer || entity instanceof ItemEntity
@@ -303,27 +321,39 @@ public final class Bridge implements AutoCloseable {
                     finish("completed", "食べ物の消費と満腹度または隠し満腹度の回復を観測した", true);
             }
             case "use", "place", "attack" -> {
-                if (server.getTickCount() >= action.deadline-15)
-                    finish("completed", "通常の使用操作を送った。効果は次の観察で確認する", false);
+                if (server.getTickCount() >= action.deadline-15) {
+                    if (bot.containerMenu!=bot.inventoryMenu) workstation.opened(action.target);
+                    var after=Sense.frame(bot,action.target,0);
+                    boolean changed=!Objects.equals(action.before.get("target_block"),after.get("target_block"))
+                        || !action.before.get("inventory").equals(after.get("inventory"))
+                        || !action.before.get("container_id").equals(after.get("container_id"));
+                    finish("completed", "通常の使用操作を送った。確認した変化だけを前後の観察に記録する", changed);
+                }
             }
         }
     }
     private void finish(String stage, String detail, boolean changed) {
-        if (bot != null && !bot.isRemoved()) { pack().stopAll(); bot.stopUsingItem(); bot.closeContainer(); }
+        if (bot != null && !bot.isRemoved()) {
+            pack().stopAll(); bot.stopUsingItem();
+            if (!stage.equals("completed")) workstation.close(bot);
+            if (operation != null) result.put("evidence",Map.of("before",operation.before,"after",Sense.frame(bot,operation.target,0)));
+        }
         result.put("stage", stage); result.put("detail", detail == null ? "操作を停止した" : detail);
         result.put("changed", changed); operation = null;
     }
     public void stop(String reason) {
         if (operation != null) finish("stopped", reason, false);
-        else if (bot != null && !bot.isRemoved()) pack().stopAll();
+        else if (bot != null && !bot.isRemoved()) { pack().stopAll(); workstation.close(bot); }
     }
     public void pause() {
         stop("Minecraft側で操作を停止した"); paused = true;
+        if (bot!=null && !bot.isRemoved()) workstation.close(bot);
         result.put("stage", "stopped"); result.put("paused", true);
         result.put("detail", "Minecraft側で停止中。ESIで再接続すると再開できます。");
     }
     public void disconnect() {
         stop("接続を解除した"); lease = ""; views.clear(); operation = null;
+        if (bot!=null && !bot.isRemoved()) workstation.close(bot);
         if (bot != null && !bot.isRemoved()) bot.kill(Component.literal("ESI disconnected"));
         bot = null;
     }
@@ -347,6 +377,7 @@ public final class Bridge implements AutoCloseable {
     static final class Operation {
         final String id, kind; final Sense.Target target; final int deadline, food; final float saturation; final Vec3 start;
         Deque<BlockPos> path = new ArrayDeque<>(); String blockName, itemName; int count;
+        Map<String,Object> before;
         Operation(String id, String kind, Sense.Target target, int deadline, Vec3 start, int food, float saturation) {
             this.id=id; this.kind=kind; this.target=target; this.deadline=deadline; this.start=start; this.food=food; this.saturation=saturation;
         }

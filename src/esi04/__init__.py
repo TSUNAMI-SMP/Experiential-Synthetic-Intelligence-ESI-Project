@@ -1,3 +1,3 @@
 """ESI-04: grounded dialogue, embodied agency and learning from demonstrations."""
 
-__version__ = "0.4.4"
+__version__ = "0.4.5"

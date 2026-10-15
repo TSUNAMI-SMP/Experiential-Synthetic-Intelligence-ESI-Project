@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import QApplication, QWidget
+from test_esi04_plugins import connected
 
 from esi04.config import Settings
 from esi04.plugin_gui import PluginPanel
@@ -20,11 +21,19 @@ def test_plugin_panel_preserves_pending_edits_and_reloads_for_a_different_charac
     window.send = lambda *args: calls.append(args) or True
     panel = PluginPanel(window)
     try:
+        connected(first)
         panel.refresh()
+        assert "手に持っている物：なし" in panel.details.toPlainText()
+        assert "minecraft:bread" in panel.details.toPlainText()
+        assert "未実行の計画" in panel.learning_view.toPlainText()
+        assert "minecraft:stone" in panel.places_view.toPlainText()
         panel.autonomous.setChecked(True)
         panel.goal.setText("近くの木を調べる")
         for _ in range(3):
             panel.refresh()
+        first.plugin_options(goal="板材を作って確かめる")
+        panel.refresh()  # A changed intention must appear even without a new sensor snapshot.
+        assert "板材を作って確かめる" in panel.learning_view.toPlainText()
         assert panel.autonomous.isChecked() and panel.goal.text() == "近くの木を調べる"
         panel.options()
         assert calls[-1][1][1] == {"autonomous": True, "goal": "近くの木を調べる"}

@@ -1,1 +1,1 @@
-9113f90db7f2d59b32c4fb4841c9b68215b666ae675724b096345fc4ea3474c4  esi-minecraft-bridge-0.4.4.jar
+39160c8e39189a7ab7aa9c370d9b49ab7892d8bd780dd5854f540a88964f1eff  esi-minecraft-bridge-0.4.5.jar

@@ -12,6 +12,7 @@ from pydantic import ConfigDict, Field, model_validator
 from esi.models import uid
 from esi02.desktop_preferences import write_json
 from esi02.world import Model
+from esi04.environment_learning import LifeLearning
 
 
 class PluginManifest(Model):
@@ -116,6 +117,32 @@ class Target(Model):
     harvestable: bool = False
 
 
+class Recipe(Model):
+    id: str = Field(max_length=160)
+    output: str = Field(max_length=120)
+    count: int = Field(ge=1, le=999)
+    ingredients: list[str] = Field(default_factory=list, max_length=9)
+    station: Literal["inventory", "crafting_table"]
+    craftable: bool = False
+    basis: Literal["unlocked_recipe_book"] = "unlocked_recipe_book"
+
+
+class ContainerItem(Model):
+    slot: int = Field(ge=0, le=89)
+    name: str = Field(max_length=120)
+    count: int = Field(ge=1, le=999)
+
+
+class OpenContainer(Model):
+    id: int = Field(ge=1)
+    kind: str = Field(max_length=120)
+    target_id: str = Field(max_length=120)
+    x: float | None = Field(default=None, ge=-30_000_000, le=30_000_000)
+    y: float | None = Field(default=None, ge=-2048, le=2048)
+    z: float | None = Field(default=None, ge=-30_000_000, le=30_000_000)
+    items: list[ContainerItem] = Field(default_factory=list, max_length=90)
+
+
 class EnvironmentObservation(Model):
     protocol: Literal[1] = 1
     id: str = Field(min_length=1, max_length=80)
@@ -126,6 +153,9 @@ class EnvironmentObservation(Model):
     actor: Actor
     inventory: list[Item] = Field(default_factory=list, max_length=41)
     targets: list[Target] = Field(default_factory=list, max_length=160)
+    recipes: list[Recipe] = Field(default_factory=list, max_length=96)
+    container: OpenContainer | None = None
+    crafting_grid: Literal[0, 2, 3] = 2
     action: dict = Field(default_factory=dict)
     events: list[str] = Field(default_factory=list, max_length=16)
     basis: Literal["game_observation"] = "game_observation"
@@ -134,9 +164,10 @@ class EnvironmentObservation(Model):
 class EnvironmentAction(Model):
     request_id: str = Field(default_factory=uid, pattern=r"^[0-9a-f]{32}$")
     observation_id: str = Field(max_length=80)
-    kind: Literal["look", "move", "go_to", "mine", "eat", "select_slot", "place", "use", "attack", "stop"]
+    kind: Literal["look", "move", "go_to", "mine", "eat", "select_slot", "place", "use", "attack", "stop",
+                  "craft", "deposit", "withdraw", "close_container"]
     target_id: str = Field(default="", max_length=120)
-    slot: int = Field(default=0, ge=0, le=40)
+    slot: int = Field(default=0, ge=0, le=35)
     yaw: float = Field(default=0, ge=-360, le=360)
     pitch: float = Field(default=0, ge=-90, le=90)
     forward: float = Field(default=0, ge=-1, le=1)
@@ -144,6 +175,9 @@ class EnvironmentAction(Model):
     jump: bool = False
     sprint: bool = False
     ticks: int = Field(default=20, ge=1, le=200)
+    recipe_id: str = Field(default="", max_length=160)
+    container_id: int = Field(default=0, ge=0)
+    container_slot: int = Field(default=0, ge=0, le=89)
     reason: str = Field(default="", max_length=300)
 
 
@@ -157,6 +191,7 @@ class PluginState(Model):
     attempts: int = Field(default=0, ge=0)
     confirmed_changes: int = Field(default=0, ge=0)
     asked_contexts: dict[str, str] = Field(default_factory=dict, max_length=32)
+    learning: LifeLearning = Field(default_factory=LifeLearning)
 
 
 class EnvironmentClient:

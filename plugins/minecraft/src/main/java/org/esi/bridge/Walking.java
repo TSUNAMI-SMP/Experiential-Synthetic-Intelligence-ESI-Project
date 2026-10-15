@@ -18,7 +18,7 @@ final class Walking {
             && !floor.is(Blocks.CAMPFIRE) && !floor.is(Blocks.SOUL_CAMPFIRE)
             && !floor.is(Blocks.CACTUS) && !floor.is(Blocks.SWEET_BERRY_BUSH);
     }
-    static Deque<BlockPos> path(ServerPlayer player, Vec3 target) {
+    static Deque<BlockPos> path(ServerPlayer player, Vec3 target, boolean adjacent) {
         BlockPos start=player.blockPosition(), end=BlockPos.containing(target);
         Map<BlockPos,BlockPos> parents=new HashMap<>(); Map<BlockPos,Double> costs=new HashMap<>();
         PriorityQueue<Node> open=new PriorityQueue<>(Comparator.comparingDouble(Node::score));
@@ -27,7 +27,7 @@ final class Walking {
         while(!open.isEmpty() && closed.size()<512) {
             BlockPos here=open.remove().point();
             if(!closed.add(here)) continue;
-            if(here.distManhattan(end)<=1 && Math.abs(here.getY()-end.getY())<=1) { found=here; break; }
+            if(here.distManhattan(end)<=(adjacent?1:0) && Math.abs(here.getY()-end.getY())<=1) { found=here; break; }
             for(int[] step:new int[][]{{1,0},{-1,0},{0,1},{0,-1}}) for(int dy:new int[]{0,1,-1}) {
                 BlockPos next=here.offset(step[0],dy,step[1]);
                 if(next.distManhattan(start)>14 || !standable(player,next)

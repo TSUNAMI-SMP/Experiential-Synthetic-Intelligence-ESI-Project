@@ -2,11 +2,32 @@
   "api_version": 1,
   "id": "minecraft.fabric",
   "name": "Minecraft / Fabric 1.21.11",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "description": "Minecraftにプレイヤーとして参加し、見える周囲・所持品・体力・満腹度から行動を選びます。CarpetとESI Bridge MODを使います。",
   "provider": "minecraft",
-  "actions": ["look", "move", "go_to", "mine", "eat", "select_slot", "place", "use", "attack", "stop"],
-  "disabled_concepts": ["noise", "hydration", "temperature", "virtual_body", "virtual_room"],
+  "actions": [
+    "look",
+    "move",
+    "go_to",
+    "mine",
+    "eat",
+    "select_slot",
+    "place",
+    "use",
+    "attack",
+    "stop",
+    "craft",
+    "deposit",
+    "withdraw",
+    "close_container"
+  ],
+  "disabled_concepts": [
+    "noise",
+    "hydration",
+    "temperature",
+    "virtual_body",
+    "virtual_room"
+  ],
   "basic_knowledge": [
     "Minecraftの世界では、ブロックや生物、アイテムがある。見えたものだけを現在の観察として使う。",
     "移動・視線変更・ジャンプで周囲を調べられる。壁を通り抜けたり飛んだりはできない。",
@@ -14,6 +35,8 @@
     "落ちたアイテムは近くへ行くと拾える。所持品から持つ物を選べる。",
     "食べられる所持品を使うと食事できる。満腹度は0から20で、減ったら食事を考える。",
     "体力が減ること、深い落下・溶岩・窒息・敵などは危険。わからないことは観察し直すか相手に尋ねる。",
-    "初期知識は基本知識と操作方法だけ。攻略手順、鉱石の隠れた位置、完成した建築や採掘の目標は与えられていない。"
+    "初期知識は基本知識と操作方法だけ。攻略手順、鉱石の隠れた位置、完成した建築や採掘の目標は与えられていない。",
+    "所持品と手に持っている物は別。持ち替え、採掘、取得をそれぞれ確かめる。",
+    "ゲーム内で解放されたレシピは材料と作業場所を確認してクラフトできる。作業台や収納は近づいて使う操作で開く。収納は開いた中身だけを見て、預ける・取り出す・閉じる操作ができる。"
   ]
 }

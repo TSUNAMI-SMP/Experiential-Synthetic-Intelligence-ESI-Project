@@ -6,6 +6,9 @@ import java.util.Map;
 import java.util.Set;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -13,7 +16,7 @@ import net.minecraft.world.level.block.Blocks;
 
 /** Optional real Python + local language model exercise. Never packaged in the release MOD. */
 public class HttpGameTest {
-    @GameTest(maxTicks=24000,skyAccess=true)
+    @GameTest(maxTicks=48000,skyAccess=true)
     public void pythonClientAndModel(GameTestHelper helper) throws Exception {
         String folder=System.getenv("ESI_MC_E2E");
         if(folder==null) {helper.succeed();return;}
@@ -36,7 +39,10 @@ public class HttpGameTest {
                 if(bridge.bot!=null && !fixture[0]) {
                     bridge.bot.getInventory().setItem(0,new ItemStack(Items.WOODEN_PICKAXE));
                     bridge.bot.getInventory().setItem(10,new ItemStack(Items.BREAD,2));
-                    bridge.bot.getFoodData().setFoodLevel(6);bridge.bot.getFoodData().setSaturation(0);fixture[0]=true;
+                    bridge.bot.getInventory().setItem(2,new ItemStack(Items.OAK_LOG));
+                    bridge.bot.awardRecipes(java.util.List.of(server.getRecipeManager().byKey(
+                        ResourceKey.create(Registries.RECIPE,Identifier.parse("minecraft:oak_planks"))).orElseThrow()));
+                    bridge.bot.getFoodData().setFoodLevel("1".equals(System.getenv("ESI_MC_CRAFT_ONLY"))?20:6);bridge.bot.getFoodData().setSaturation(0);fixture[0]=true;
                 }
                 bridge.tick();
                 if(Files.exists(done)) {

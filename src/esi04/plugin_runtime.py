@@ -33,6 +33,7 @@ class EnvironmentRuntime:
         self.environment_generation += 1
         client, self.environment_client = self.environment_client, None
         self.session.plugins.autonomous = False
+        self.session.plugin_interrupted("接続を解除したため、中断した操作の成否は確定せず保留した。")
         self._status("plugin_connected", False)
         self._status("plugin_session", "")
         self._status("plugin_phase", "disconnected")
@@ -59,7 +60,7 @@ class EnvironmentRuntime:
         if re.search(r"(?:操作|マイクラ|Minecraft|行動).*(?:止めて|停止|やめて)|^(?:もう)?(?:止まって|止めて|やめて|停止して)[。！!\s]*$", text, re.I):
             self.session.plugin_options(autonomous=False)
             self.session.update_turn(turn["id"], plugin_request="Minecraftでの自律活動を停止した")
-        elif re.search(r"(?:掘って|採掘して|食べて|歩いて|移動して|調べて|集めて|拾って|見てきて|暮らして|生活して|持ち替えて|装備して|手に持って|ジャンプして|使って|置いて)(?:みて|ほしい|ほしいです|ください|くれる|くれない)?(?:ね|よ)?[。？！!?\s]*$", text):
+        elif re.search(r"(?:掘って|採掘して|食べて|歩いて|移動して|調べて|集めて|拾って|見てきて|暮らして|生活して|持ち替えて|装備して|手に持って|ジャンプして|使って|置いて|クラフトして|作って|預けて|しまって|取り出して)(?:みて|ほしい|ほしいです|ください|くれる|くれない)?(?:ね|よ)?[。？！!?\s]*$", text):
             self.session.plugin_options(goal=text)
             self.session.update_turn(turn["id"], plugin_request=text)
 
@@ -91,8 +92,9 @@ class EnvironmentRuntime:
                         and self.session.plugins.observation.action.get("paused")):
                     raise RuntimeError("Minecraft側で停止中です。再接続してから自律活動を開始してください。")
                 self._cancel_environment_decision()
+                changed_goal = values.get("goal") is not None and values["goal"].strip() != self.session.plugins.goal
                 self.session.plugin_options(**values)
-                if not self.session.plugins.autonomous and self.environment_client:
+                if (not self.session.plugins.autonomous or changed_goal) and self.environment_client:
                     self._environment_job("environment_stop", self.environment_client.stop)
                 self.environment_next_decision = 0
             elif operation == "manual":
@@ -102,6 +104,7 @@ class EnvironmentRuntime:
                 action = menu.get(values["id"])
                 if action is None:
                     raise ValueError("観察にない操作です。更新して選び直してください。")
+                self.session.plugin_attempt(action.model_dump())
                 self._environment_job("environment_action", self.environment_client.act, action.model_dump())
             elif operation == "stop":
                 self._cancel_environment_decision()
@@ -153,9 +156,11 @@ class EnvironmentRuntime:
                     if value["action"]:
                         action = current_action(value, observation, self.session.active_manifest())
                         if action:
+                            self.session.plugin_attempt(action, value)
                             self._environment_job("environment_action", self.environment_client.act, action)
                         else:
                             self._status("plugin_phase", "状況が変わったため観察し直しています")
+                            self.session.plugin_interrupted("推論中に対象・所持品・作業条件が変わったため、実行せず考え直す。")
                     elif value["choice"] == "ask":
                         self.session.plugin_question(value["question"], value["reason"])
                     self.session._write()
@@ -165,6 +170,10 @@ class EnvironmentRuntime:
             except Cancelled:
                 pass
             except Exception as exc:
+                if job["kind"] == "environment_action":
+                    # An HTTP error can still have a source-linked failed result on the MOD.
+                    # Keep its ID until the next observation, so a real failure can be learned.
+                    self.session.plugin_interrupted("操作の通信が完了せず、成否は未確認。現在の状態を観察し直す。", retain_pending=True)
                 self._status("plugin_error", str(exc))
                 self.environment_next_decision = time.monotonic()+5
                 if job["kind"] in {"environment_connect", "environment_observe"}:

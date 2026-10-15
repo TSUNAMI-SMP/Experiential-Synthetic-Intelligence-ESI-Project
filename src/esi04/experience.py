@@ -43,11 +43,17 @@ def reply_relation(text, question):
 
 
 class Experience(PreviousExperience):
-    outcome_sources = PreviousExperience.outcome_sources | {"computer_observation"}
+    outcome_sources = PreviousExperience.outcome_sources | {"computer_observation", "game_observation"}
     state_class = ExperienceState
     initial_question_delay = 0
 
     def outcome(self, identifier, activity, reward, provenance, source_id, details=None):
+        if provenance == "game_observation" and (
+            not isinstance(details, dict) or details.get("id") != source_id or details.get("status") != "verified"
+            or not details.get("effect_observed") or not details.get("before") or not details.get("after")
+            or details["before"] == details["after"]
+        ):
+            raise ValueError("ゲームの学習には、自分の操作と前後の観察に結び付いた変化が必要です。")
         if provenance == "computer_observation" and (
             not isinstance(details, dict) or details.get("id") != source_id
             or details.get("status") != "verified" or not details.get("after") or not details.get("effect_observed")

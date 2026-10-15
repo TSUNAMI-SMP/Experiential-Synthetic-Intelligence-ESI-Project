@@ -11,6 +11,7 @@ dependencies {
     modImplementation "maven.modrinth:carpet:${project.carpet_version}"
 }
 fabricApi { configureTests { createSourceSet = true; modId = 'esi_bridge_test'; enableGameTests = true; enableClientGameTests = false; eula = false } }
+tasks.named('runGameTest') { maxHeapSize = '1024m' }
 processResources {
     from('THIRD-PARTY-NOTICES.txt')
     inputs.property 'version', project.version
