@@ -1,6 +1,7 @@
 """Revocable screen/PC grants, fresh-frame actions and replay of demonstrated skills."""
 
 import hashlib
+import json
 import threading
 import time
 from contextlib import contextmanager
@@ -27,6 +28,7 @@ class Grant:
     move_avatar: bool = False
     application: str = ""
     pid: int = 0
+    handle: int = 0
 
 
 class ComputerMemory:
@@ -92,6 +94,18 @@ class ComputerMemory:
             folder.mkdir(exist_ok=True)
             write_json(folder / (skill.id+".json"), skill.model_dump())
 
+    def games(self):
+        from esi04.games import GameProfile
+        result = []
+        for path in (self.root / "games").glob("*.json"):
+            result.append(GameProfile.model_validate_json(path.read_text(encoding="utf-8")))
+        return sorted(result, key=lambda game: game.taught_at)
+
+    def save_game(self, profile):
+        from esi04.games import GameProfile
+        profile = GameProfile.model_validate(profile.model_dump())
+        self.record("games", profile, maximum=64)
+
     def delete_skill(self, identifier):
         with self.lock:
             skills = self.skills()
@@ -124,6 +138,11 @@ class ComputerMemory:
         for skill in self.skills():
             protected.update(step.before_frame for step in skill.steps)
             protected.update(step.after_frame for step in skill.steps)
+        for game in self.games():
+            protected.update(cue.frame_id for cue in game.cues)
+        for path in (self.root / "game_demos").glob("*.json"):
+            for example in json.loads(path.read_text(encoding="utf-8")).get("examples", []):
+                protected.update([example.get("frame_id"), example.get("after_frame")])
         paths = sorted(self.root.glob("frames/*.png"), key=lambda p: p.stat().st_mtime)
         def size(path):
             metadata = path.with_suffix(".json")
@@ -142,7 +161,8 @@ class ComputerMemory:
     def erase(self):
         """Called only by the explicit screen-history deletion control, after revocation."""
         with self.lock:
-            for folder in ("frames", "skills", "anchors", "observations", "actions", "teachings"):
+            for folder in ("frames", "skills", "anchors", "observations", "actions", "teachings",
+                           "games", "game_demos", "game_episodes"):
                 for path in (self.root / folder).glob("*"):
                     if path.is_file():
                         path.unlink()
@@ -202,13 +222,15 @@ class ComputerHub:
         self.sequence = 0
         self.attention = None
         self.active_cancel = None
+        self.interactive = False
+        self.input_error = ""
 
     def configure(self, screen, observe=False, control=False, demonstrate=False, move_avatar=False,
-                  application="", pid=0):
+                  application="", pid=0, handle=0):
         with self.condition:
             self.revoke()
             self.grant = Grant(self.grant.generation, screen, bool(observe or control or demonstrate),
-                               bool(control), bool(demonstrate), bool(move_avatar and control), application, pid)
+                               bool(control), bool(demonstrate), bool(move_avatar and control), application, pid, handle)
             self.condition.notify_all()
             return self.grant
 
@@ -220,6 +242,11 @@ class ComputerHub:
             self.latest = None
             self.recent.clear()
             self.attention = None
+            if hasattr(self.native, "release_inputs"):
+                try:
+                    self.native.release_inputs()
+                except (OSError, ValueError) as exc:
+                    self.input_error = str(exc)
             self.condition.notify_all()
 
     def publish(self, frame):
@@ -230,6 +257,9 @@ class ComputerHub:
                 self.latest = None
                 return False
             if self.grant.pid and frame.foreground.pid != self.grant.pid:
+                self.latest = None
+                return False
+            if self.grant.handle and frame.foreground.handle != self.grant.handle:
                 self.latest = None
                 return False
             self.sequence = frame.sequence
@@ -269,7 +299,68 @@ class ComputerHub:
             raise PermissionError("許可したアプリの外では操作しません。")
         if grant.application and foreground.application != grant.application:
             raise PermissionError("許可したアプリの外では操作しません。")
+        if grant.handle and foreground.handle != grant.handle:
+            raise PermissionError("選んだウィンドウの外では操作しません。")
+        if ((self.interactive or grant.handle) and foreground.bounds and frame.foreground.bounds
+                and foreground.bounds != frame.foreground.bounds):
+            raise RuntimeError("ゲームのウィンドウ位置が変わりました。画像と範囲を確認して再開してください。")
         return grant
+
+    def interactive_input(self, frame, keys, buttons, point, duration, cancellation, region):
+        """Game-only moving canvas input. No anchors from an earlier image are reused."""
+        from esi04.native_computer import validate_keys
+
+        if keys:
+            validate_keys(keys)
+        if any(b not in {"left", "right", "middle"} for b in buttons) or not 0.02 <= duration <= 1.2:
+            raise ValueError("ゲームの入力設定を確認してください。")
+        if point and not (region[0] <= point[0] <= region[2] and region[1] <= point[1] <= region[3]):
+            raise ValueError("ゲームの範囲外への操作は行いません。")
+        with self.operation_lock:
+            generation = frame.generation
+            with self.condition:
+                self._check_control(frame, generation, cancellation)
+                if not self.grant.handle:
+                    raise PermissionError("ゲームのウィンドウを対象に選んでください。")
+                if time.monotonic()-frame.captured_at > 2:
+                    raise RuntimeError("ゲームの判断に時間がかかり、画面が古くなりました。色の目印モードを使ってください。")
+                if any(e.protected and e.focused for e in frame.elements):
+                    raise PermissionError("保護された入力欄では操作しません。")
+                if buttons and point is None:
+                    cursor = self.native.cursor()
+                    if not frame.physical.contains(*cursor):
+                        raise ValueError("カーソルがゲームの画像の外にあります。")
+                    cx = (cursor[0]-frame.physical.x)*1000/frame.physical.width
+                    cy = (cursor[1]-frame.physical.y)*1000/frame.physical.height
+                    if not (region[0] <= cx <= region[2] and region[1] <= cy <= region[3]):
+                        raise ValueError("カーソルをゲームの範囲内へ移動してください。")
+                self.active_cancel = cancellation
+                target = frame.image_point(*point) if point else None
+                self.attention = {"generation": generation, "frame_id": frame.id, "point": target,
+                                  "label": "ゲーム", "at": time.monotonic()}
+            try:
+                with self.condition:
+                    self._check_control(frame, generation, cancellation)
+                    if target:
+                        self.native.move(*target)
+                    if keys:
+                        self.native.key_down(keys)
+                    for button in buttons:
+                        self.native.button_down(button)
+                deadline = time.monotonic()+duration
+                while time.monotonic() < deadline:
+                    with self.condition:
+                        self._check_control(frame, generation, cancellation)
+                        if self.native.emergency_pressed():
+                            raise RuntimeError("F8でゲームの操作を停止しました。")
+                    cancellation.event.wait(min(0.02, max(0, deadline-time.monotonic())))
+            finally:
+                try:
+                    self.native.release_inputs()
+                finally:
+                    self.active_cancel = None
+            return {"frame_id": frame.id, "keys": keys, "buttons": buttons, "point": point,
+                    "duration": duration, "status": "input_sent"}
 
     def _source(self, action, before):
         source = self.recent.get(action.frame_id)

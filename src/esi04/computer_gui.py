@@ -7,23 +7,11 @@ from concurrent.futures import ThreadPoolExecutor
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication, QPixmap
-from PySide6.QtWidgets import (
-    QCheckBox,
-    QComboBox,
-    QFormLayout,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QListWidget,
-    QPushButton,
-    QTextEdit,
-    QVBoxLayout,
-    QWidget,
-)
 
-from esi.models import uid, utc
+from esi.models import utc
 from esi04.computer import ComputerHub, ComputerMemory
-from esi04.computer_models import Rect, ScreenTeaching
+from esi04.computer_models import Rect
+from esi04.computer_panel import ComputerPanel as ComputerPanel
 from esi04.demonstration import Demonstration
 from esi04.native_computer import backend, recorder
 
@@ -68,9 +56,11 @@ class ComputerSupervisor(QObject):
         self.future = None
         self.sample_generation = None
         self.recording = None
+        self.recording_game = False
         self.native_recorder = None
         self.last_demo_frame = None
         self.sequence = 0
+        self.emergency_latched = False
         self.last_png_hash = ""
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.poll)
@@ -90,11 +80,21 @@ class ComputerSupervisor(QObject):
 
     def metadata(self):
         foreground = self.hub.native.foreground()
-        elements = self.hub.native.elements(foreground)
+        # UI Automation can take seconds in a browser; a game canvas needs fresh frames.
+        elements = [] if self.hub.interactive or self.recording_game else self.hub.native.elements(foreground)
         return foreground, elements
 
     def poll(self):
         try:
+            fast = self.hub.interactive or self.recording_game
+            self.timer.setInterval(80 if fast else 250)
+            if self.hub.native.emergency_pressed():
+                if not self.emergency_latched:
+                    self.emergency_latched = True
+                    self.revoke()
+                    self.problem.emit("F8で予約・画面共有とPC操作を停止しました。")
+                return
+            self.emergency_latched = False
             if self.native_recorder:
                 if self.native_recorder.error:
                     raise RuntimeError(self.native_recorder.error)
@@ -105,7 +105,8 @@ class ComputerSupervisor(QObject):
                         break
                     if self.recording:
                         current = self.hub.native.foreground()
-                        if current.application == self.recording.application:
+                        if (current.application == self.recording.application
+                                and (not self.hub.grant.handle or current.handle == self.hub.grant.handle)):
                             self.recording.event(event, self.hub.latest)
             if self.future and self.future.done():
                 future, self.future = self.future, None
@@ -126,6 +127,7 @@ class ComputerSupervisor(QObject):
             raise RuntimeError("選択した画面が接続されていません。画面共有を停止しました。")
         current = self.hub.native.foreground()
         if (current.handle != foreground.handle or (grant.pid and current.pid != grant.pid)
+                or (grant.handle and current.handle != grant.handle)
                 or (grant.application and current.application != grant.application)):
             return
         physical = physical_screen(screen)
@@ -180,7 +182,27 @@ class ComputerSupervisor(QObject):
             raise RuntimeError("共有画面が届いてから実演を開始してください。")
         demonstration = Demonstration(self.hub, name, goal)
         native = recorder()
-        native.start()
+        try:
+            native.start()
+        except Exception:
+            native.stop()
+            raise
+        self.recording, self.native_recorder = demonstration, native
+        self.last_demo_frame = self.hub.latest
+        self.changed.emit()
+
+    def start_game_recording(self, profile):
+        from esi04.games import GameDemonstration
+        if self.recording or self.hub.interactive:
+            raise RuntimeError("記録や操作を停止してから実演してください。")
+        demonstration = GameDemonstration(self.hub, profile)
+        native = recorder(game=True)
+        try:
+            native.start()
+        except Exception:
+            native.stop()
+            raise
+        self.recording_game = True
         self.recording, self.native_recorder = demonstration, native
         self.last_demo_frame = self.hub.latest
         self.changed.emit()
@@ -189,13 +211,15 @@ class ComputerSupervisor(QObject):
         if self.native_recorder:
             self.native_recorder.stop()
         self.native_recorder = None
+        self.recording_game = False
         demonstration, self.recording = self.recording, None
         if demonstration:
             if save:
                 if self.last_demo_frame:
                     demonstration.captured(self.last_demo_frame)
                 skill = demonstration.finish()
-                self.skill_saved.emit(skill.id)
+                if hasattr(skill, "steps"):
+                    self.skill_saved.emit(skill.id)
             else:
                 self.hub.memory.pinned.clear()
         self.changed.emit()
@@ -204,187 +228,3 @@ class ComputerSupervisor(QObject):
         self.revoke()
         self.timer.stop()
         self.pool.shutdown(wait=False, cancel_futures=True)
-
-
-class ComputerPanel(QWidget):
-    def __init__(self, window, supervisor):
-        super().__init__()
-        self.window, self.supervisor = window, supervisor
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("選択した画面を見せたり、操作の実演を教えたりできます。アクセスは終了・停止時に解除されます。"))
-        form = QFormLayout()
-        self.screens = QComboBox()
-        self.refresh_screens()
-        form.addRow("共有する画面", self.screens)
-        self.allow_observe = QCheckBox("画面の観察を許可")
-        self.allow_control = QCheckBox("選択画面内でマウス・キーボード操作を許可")
-        self.allow_record = QCheckBox("実演の記録を許可（記録開始時だけ記録）")
-        self.allow_move = QCheckBox("操作中にアバターが自分で位置を変える")
-        self.allow_move.setChecked(True)
-        for check in (self.allow_observe, self.allow_control, self.allow_record, self.allow_move):
-            form.addRow(check)
-        layout.addLayout(form)
-        row = QHBoxLayout()
-        for title, callback in (("設定を適用", self.apply), ("すべて停止", self.stop), ("画面一覧を更新", self.refresh_screens)):
-            button = QPushButton(title)
-            button.clicked.connect(callback)
-            row.addWidget(button)
-        layout.addLayout(row)
-        self.status = QLabel("画面共有・PC操作：停止")
-        self.status.setWordWrap(True)
-        layout.addWidget(self.status)
-        self.question = QLineEdit()
-        self.question.setPlaceholderText("例：この画面の青いボタンには何と書いてある？")
-        layout.addWidget(self.question)
-        row = QHBoxLayout()
-        observe = QPushButton("今の画面を見てもらう")
-        observe.clicked.connect(lambda: self.command("observe", {"question": self.question.text() or "今の画面には何が見える？"}))
-        row.addWidget(observe)
-        teach = QPushButton("画面についての説明を教える")
-        teach.clicked.connect(self.teach)
-        row.addWidget(teach)
-        layout.addLayout(row)
-        self.skill_name, self.skill_goal = QLineEdit(), QLineEdit()
-        self.skill_name.setPlaceholderText("実演の名前（例：メモを書く）")
-        self.skill_goal.setPlaceholderText("何を達成する操作か")
-        layout.addWidget(self.skill_name)
-        layout.addWidget(self.skill_goal)
-        row = QHBoxLayout()
-        for label, callback in (("実演の記録を開始", self.record), ("記録を終了して覚える", self.finish_record),
-                                ("記録を破棄", lambda: self.supervisor.stop_recording(False))):
-            button = QPushButton(label)
-            button.clicked.connect(callback)
-            row.addWidget(button)
-        layout.addLayout(row)
-        self.skills = QListWidget()
-        layout.addWidget(self.skills)
-        self.allow_practice = QCheckBox("この実演を、自分で選んで練習してよい（PC操作の許可中だけ）")
-        self.allow_practice.toggled.connect(self.practice_changed)
-        self.skills.currentRowChanged.connect(self.selected_skill)
-        layout.addWidget(self.allow_practice)
-        replay = QPushButton("選んだ実演を再現する")
-        replay.clicked.connect(self.replay)
-        layout.addWidget(replay)
-        remove = QPushButton("選んだ実演を削除する")
-        remove.clicked.connect(self.delete_skill)
-        layout.addWidget(remove)
-        self.observation = QTextEdit()
-        self.observation.setReadOnly(True)
-        self.observation.setMaximumHeight(170)
-        layout.addWidget(self.observation)
-        supervisor.problem.connect(self.status.setText)
-        supervisor.changed.connect(self.refresh)
-        supervisor.skill_saved.connect(self.skill_added)
-        self.loaded_skills = None
-        self.displayed_generation = None
-        self.refresh()
-
-    def refresh_screens(self):
-        self.screens.clear()
-        for screen in QGuiApplication.screens():
-            self.screens.addItem(screen.name(), screen.name())
-
-    def apply(self):
-        try:
-            self.supervisor.configure(screen=self.screens.currentData() or "", observe=self.allow_observe.isChecked(),
-                                      control=self.allow_control.isChecked(), demonstrate=self.allow_record.isChecked(),
-                                      move_avatar=self.allow_move.isChecked())
-        except Exception as exc:
-            self.status.setText(str(exc))
-
-    def stop(self):
-        self.supervisor.revoke()
-        for check in (self.allow_observe, self.allow_control, self.allow_record):
-            check.setChecked(False)
-        if self.window.runtime:
-            self.window.send("stop_computer", None)
-
-    def command(self, operation, values):
-        if not self.window.runtime:
-            self.status.setText("会話を開始してから画面認識・PC操作を使ってください。")
-            return
-        self.window.send("computer", (operation, values))
-
-    def teach(self):
-        text, frame = self.question.text().strip(), self.supervisor.hub.latest
-        if not text or frame is None:
-            self.status.setText("画面を共有し、説明を入力してください。")
-            return
-        entry = ScreenTeaching(id=uid(), frame_id=frame.id, frame_sha256=frame.sha256,
-                               user_text=text, observed_at=utc())
-        self.supervisor.hub.memory.record("teachings", entry)
-        self.command("teaching", entry.model_dump())
-
-    def record(self):
-        self.status.setText("対象アプリへ切り替えてください。3秒後に実演の記録を開始します。")
-        QTimer.singleShot(3000, self.begin_record)
-
-    def begin_record(self):
-        try:
-            self.supervisor.start_recording(self.skill_name.text(), self.skill_goal.text())
-        except Exception as exc:
-            self.status.setText(str(exc))
-
-    def finish_record(self):
-        try:
-            self.supervisor.stop_recording()
-        except Exception as exc:
-            self.status.setText(str(exc))
-
-    def skill_added(self, identifier):
-        self.loaded_skills = None
-        self.refresh()
-        if self.window.runtime:
-            self.window.send("computer", ("skill_learned", {"id": identifier}))
-
-    def replay(self):
-        item = self.skills.currentItem()
-        if item:
-            self.command("replay", {"id": item.data(Qt.ItemDataRole.UserRole)})
-
-    def selected_skill(self):
-        item = self.skills.currentItem()
-        skill = next((s for s in self.supervisor.hub.memory.skills()
-                      if item and s.id == item.data(Qt.ItemDataRole.UserRole)), None)
-        self.allow_practice.blockSignals(True)
-        self.allow_practice.setChecked(bool(skill and skill.practice_allowed))
-        self.allow_practice.blockSignals(False)
-
-    def delete_skill(self):
-        item = self.skills.currentItem()
-        if not item:
-            return
-        self.stop()
-        try:
-            self.supervisor.hub.memory.delete_skill(item.data(Qt.ItemDataRole.UserRole))
-            self.loaded_skills = None
-            self.refresh()
-        except (OSError, ValueError, RuntimeError) as exc:
-            self.status.setText(str(exc))
-
-    def practice_changed(self, value):
-        item = self.skills.currentItem()
-        skill = next((s for s in self.supervisor.hub.memory.skills()
-                      if item and s.id == item.data(Qt.ItemDataRole.UserRole)), None)
-        if skill:
-            skill.practice_allowed = bool(value)
-            self.supervisor.hub.memory.save_skill(skill)
-
-    def refresh(self):
-        grant, frame = self.supervisor.hub.grant, self.supervisor.hub.latest
-        if grant.generation != self.displayed_generation:
-            self.displayed_generation = grant.generation
-            self.allow_observe.setChecked(grant.observe)
-            self.allow_control.setChecked(grant.control)
-            self.allow_record.setChecked(grant.demonstrate)
-        self.status.setText(("画面共有："+grant.screen+" / PC操作："+("許可" if grant.control else "停止")
-                            + (" / 実演を記録中" if self.supervisor.recording else "")
-                            + (" / "+frame.foreground.application if frame else " / 画面を待っています"))
-                           if grant.observe else "画面共有・PC操作：停止")
-        if self.loaded_skills is None:
-            self.skills.clear()
-            skills = self.supervisor.hub.memory.skills()
-            for skill in skills:
-                self.skills.addItem(skill.name+f"（{len(skill.steps)}操作）")
-                self.skills.item(self.skills.count()-1).setData(Qt.ItemDataRole.UserRole, skill.id)
-            self.loaded_skills = len(skills)

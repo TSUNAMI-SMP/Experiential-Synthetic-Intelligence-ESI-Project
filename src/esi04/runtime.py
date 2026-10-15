@@ -14,6 +14,7 @@ from esi04.computer_models import ScreenTeaching
 from esi04.deliberation import context as idle_context
 from esi04.deliberation import deliberate
 from esi04.dialogue import DialogueLLM
+from esi04.games import GamePlayer
 
 SCREEN_QUERY = re.compile(r"(?:画面|動画|ウィンドウ).*(?:見える|映って|何|どこ|どう|読んで|見て|教えて|説明|ですか|ますか|[？?])|(?:この|今の).*(?:ボタン|アイコン|入力欄).*(?:何|どこ|どう|教えて|ですか|ますか|[？?])")
 SCREEN_TEACHING = re.compile(r"(?:この|今の|画面の).*(?:ボタン|アイコン|入力欄|表示|画面).*(?:は|が|を).+(?:です|だよ|という|っていう|使う|使います)[。！!\s]*$")
@@ -114,14 +115,45 @@ class Runtime(PreviousRuntime):
             if skill is None:
                 raise ValueError("その実演は見つかりません。")
             function, arguments = self.computer.replay, (skill.model_dump(), cancellation)
+        elif operation in {"game", "test_input"}:
+            profile = next((g for g in self.computer.memory.games() if g.id == values["id"]), None)
+            if profile is None:
+                raise ValueError("教えたゲームが見つかりません。保存してから試してください。")
+            if operation == "game":
+                function, arguments = GamePlayer(self.settings, self.computer, self.services).run, (
+                    profile.model_dump(), values.get("seconds", 5), cancellation,
+                    lambda step: self._telemetry("game_step", step))
+            else:
+                binding = next((b for b in profile.bindings if b.name == values["binding"]), None)
+                if binding is None:
+                    raise ValueError("その操作が操作表にありません。")
+                def test_input():
+                    frame = self.computer.snapshot(cancellation)
+                    if profile.application and frame.foreground.application != profile.application:
+                        raise ValueError("教えたアプリと対象が違います。")
+                    cursor = self.computer.native.cursor()
+                    if not frame.physical.contains(*cursor):
+                        raise ValueError("カーソルをゲームの中へ移動してください。")
+                    point = [round((cursor[0]-frame.physical.x)*1000/frame.physical.width),
+                             round((cursor[1]-frame.physical.y)*1000/frame.physical.height)]
+                    self.computer.interactive_input(frame, binding.keys, [binding.button] if binding.button else [],
+                        point, binding.milliseconds/1000, cancellation, profile.region)
+                    return {"stage": "unverified", "summary": binding.name+"を1回入力した。ゲームでの効果は未確認。", "results": []}
+                function, arguments = test_input, ()
         else:
             raise ValueError("利用できないPC操作です。")
         self.computer_task = {"operation": operation, "cancellation": cancellation}
-        self._status("computer_phase", "observing" if operation == "observe" else "operating")
+        self._status("computer_error", "")
+        self._status("computer_result", None)
+        self._status("game_step", {})
+        self._status("computer_phase", "observing" if operation == "observe" else "playing" if operation == "game" else "operating")
         self._job("computer", kind, function, *arguments, operation=operation, cancellation=cancellation,
                   turn_id=turn_id, generation=self.computer.grant.generation)
 
     def _handle(self, name, data):
+        if name == "game_step":
+            self._status("game_step", data)
+            return
         if name == "avatar_move":
             self.session.agency.summarize("アバターの位置を選ぶ", str(data["target"]), data["reason"],
                                           [data["frame"]], certainty="planned")
@@ -146,7 +178,11 @@ class Runtime(PreviousRuntime):
             return
         if name == "stop_computer":
             self._cancel_computer()
+            if self.computer:
+                self.computer.revoke()
             self.session.cognition.pending_computer_task = ""
+            self._status("computer_error", "")
+            self._status("computer_phase", "waiting")
             return
         if name == "computer":
             operation, values = data
@@ -161,7 +197,12 @@ class Runtime(PreviousRuntime):
                                               certainty="observed")
                 self.session._write()
             else:
-                self._start_computer(operation, values)
+                try:
+                    self._start_computer(operation, values)
+                except Exception as exc:
+                    self._status("computer_error", str(exc))
+                    if not self.computer_task:
+                        self._status("computer_phase", "waiting")
             return
         super()._handle(name, data)
 
@@ -177,6 +218,7 @@ class Runtime(PreviousRuntime):
             try:
                 result = future.result()
                 if job["cancellation"].event.is_set():
+                    self._status("cognition_phase" if job["kind"] == "deliberation" else "computer_phase", "waiting")
                     continue
                 if job["kind"] == "deliberation":
                     if self.current and self._is_current(self.current["turn_id"]):
@@ -193,6 +235,7 @@ class Runtime(PreviousRuntime):
                     self._status("cognition_phase", "waiting")
                     continue
                 if not self.computer or self.computer.grant.generation != job["generation"]:
+                    self._status("computer_phase", "waiting")
                     continue
                 if job["operation"] == "observe":
                     turn_id = job.get("turn_id")
@@ -212,6 +255,7 @@ class Runtime(PreviousRuntime):
                 self._status("vision_backend", dict(self.services.vision_backend))
                 self._status("computer_phase", "waiting")
             except Cancelled:
+                self._status("cognition_phase" if job["kind"] == "deliberation" else "computer_phase", "waiting")
                 if job["kind"] == "screen_for_reply" and self._is_current(job.get("turn_id")):
                     self.session.update_turn(job["turn_id"], screen_error="画面の観察を中止しました。")
                     self.current["generation_started"] = False
@@ -221,6 +265,7 @@ class Runtime(PreviousRuntime):
                     continue
                 name = "cognition_error" if job["kind"] == "deliberation" else "computer_error"
                 self._status(name, str(exc))
+                self._status("cognition_phase" if job["kind"] == "deliberation" else "computer_phase", "waiting")
                 if job["kind"] == "deliberation":
                     self.session.agency.remember_processed(job["context_key"])
                     self.session._write()
@@ -234,6 +279,8 @@ class Runtime(PreviousRuntime):
             super()._schedule_memory()
 
     def _schedule(self):
+        if self.computer_task and self.services:
+            self._status("vision_backend", dict(self.services.vision_backend))
         if self.current and self._is_current(self.current["turn_id"]):
             turn = self.session.turns[self.current["turn_id"]]
             if (turn.get("screen_query") and not turn.get("screen_observation") and not turn.get("screen_error")

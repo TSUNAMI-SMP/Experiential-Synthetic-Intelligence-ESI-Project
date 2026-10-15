@@ -51,6 +51,8 @@ class Window(PreviousWindow):
                                         if self.tabs.widget(index) is self.history_panel else None)
 
     def setup_computer(self):
+        if isinstance(self.computer_panel, ComputerPanel):
+            self.computer_panel.close_wide()
         if self.computer_supervisor:
             self.computer_supervisor.shutdown()
         if self.computer_panel:
@@ -149,16 +151,11 @@ class Window(PreviousWindow):
         super().refresh()
         if self.computer_panel and isinstance(self.computer_panel, ComputerPanel):
             self.computer_panel.refresh()
-            status = self.session.status
-            observation = status.get("screen_observation")
-            if observation:
-                result = observation["result"]
-                self.computer_panel.observation.setPlainText(result["description"]+"\n"+"\n".join(result["visible_text"])
-                    + ("\n画像の読み取りは未確認の推定を含みます。" if result["uncertain"] else ""))
-            if status.get("computer_error"):
-                self.computer_panel.status.setText(status["computer_error"])
+            self.computer_panel.runtime_status(self.session.status)
 
     def closeEvent(self, event):
+        if isinstance(self.computer_panel, ComputerPanel):
+            self.computer_panel.close_wide()
         if self.computer_supervisor:
             self.computer_supervisor.revoke()
         super().closeEvent(event)

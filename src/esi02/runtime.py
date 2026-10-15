@@ -197,7 +197,10 @@ class Runtime:
     def _status(self, name, value):
         with self.session.lock:
             self.session.status[name] = value
-            if isinstance(value, str) and value.startswith("failed"):
+            # A phase is a state, not an error message. Preserve the original exception.
+            if isinstance(value, str) and value.startswith("failed") and name not in {
+                "phase", "tools_phase", "computer_phase", "cognition_phase", "memory_phase", "request_phase"
+            }:
                 self.session.status["error"] = f"{name}：{value.removeprefix('failed: ')}"
                 if name in {"asr", "vad", "microphone"}:
                     self.session.status.setdefault("audio_errors", {})[name] = self.session.status["error"]

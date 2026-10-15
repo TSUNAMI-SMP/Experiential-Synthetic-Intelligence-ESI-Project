@@ -24,7 +24,79 @@ def validate_keys(keys):
         raise ValueError("アプリを切り替える操作は、切替先を観察してから行ってください。")
 
 
-class WindowsBackend:
+class HeldInputs:
+    """Only inputs pressed by ESI are released; never leave keys down after a cancellation."""
+
+    def _input_state(self):
+        if not hasattr(self, "input_lock"):
+            self.input_lock = threading.RLock()
+            self.held_keys, self.held_buttons = set(), set()
+
+    def key_down(self, keys):
+        validate_keys(keys)
+        self._input_state()
+        with self.input_lock:
+            for key in keys:
+                if key not in self.held_keys:
+                    self.held_keys.add(key)
+                    try:
+                        self._key_event(key, True)
+                    except ValueError:
+                        self.held_keys.discard(key)
+                        raise
+
+    def key_up(self, keys):
+        self._input_state()
+        with self.input_lock:
+            for key in reversed(keys):
+                if key in self.held_keys:
+                    self._key_event(key, False)
+                    self.held_keys.discard(key)
+
+    def key(self, keys):
+        try:
+            self.key_down(keys)
+        finally:
+            self.key_up(keys)
+
+    def button_down(self, button):
+        if button not in {"left", "right", "middle"}:
+            raise ValueError("利用できないマウスボタンです。")
+        self._input_state()
+        with self.input_lock:
+            if button not in self.held_buttons:
+                self.held_buttons.add(button)
+                self._button_event(button, True)
+
+    def button_up(self, button):
+        self._input_state()
+        with self.input_lock:
+            if button in self.held_buttons:
+                self._button_event(button, False)
+                self.held_buttons.discard(button)
+
+    def release_inputs(self):
+        self._input_state()
+        with self.input_lock:
+            errors = []
+            for key in list(self.held_keys):
+                try:
+                    self.key_up([key])
+                except (OSError, ValueError) as exc:
+                    errors.append(exc)
+            for button in list(self.held_buttons):
+                try:
+                    self.button_up(button)
+                except (OSError, ValueError) as exc:
+                    errors.append(exc)
+            if errors:
+                raise errors[0]
+
+    def emergency_pressed(self):
+        return False
+
+
+class WindowsBackend(HeldInputs):
     def __init__(self):
         from ctypes import wintypes as w
         self.w = w
@@ -54,6 +126,7 @@ class WindowsBackend:
         self.user.SendInput.argtypes = [w.UINT, ctypes.POINTER(Input), ctypes.c_int]
         self.user.SendInput.restype = w.UINT
         self.user.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
+        self._input_state()
 
     def foreground(self):
         w = self.w
@@ -124,20 +197,26 @@ class WindowsBackend:
             self._send([self.Input(type=1, ki=self.Keyboard(wScan=scan, dwFlags=4)),
                         self.Input(type=1, ki=self.Keyboard(wScan=scan, dwFlags=6))])
 
-    def key(self, keys):
-        validate_keys(keys)
+    def _key_event(self, key, down):
         mapping = {"CTRL": 17, "SHIFT": 16, "ALT": 18, "ENTER": 13, "TAB": 9, "ESC": 27,
                    "BACKSPACE": 8, "DELETE": 46, "HOME": 36, "END": 35, "LEFT": 37, "UP": 38,
                    "RIGHT": 39, "DOWN": 40, "PAGEUP": 33, "PAGEDOWN": 34, "SPACE": 32}
-        codes = [mapping.get(k, ord(k) if len(k) == 1 else 0) for k in keys]
-        self._send([self.Input(type=1, ki=self.Keyboard(wVk=k)) for k in codes]
-                   + [self.Input(type=1, ki=self.Keyboard(wVk=k, dwFlags=2)) for k in reversed(codes)])
+        code = mapping.get(key, ord(key) if len(key) == 1 else 0)
+        extended = 1 if key in {"LEFT", "RIGHT", "UP", "DOWN", "HOME", "END", "PAGEUP", "PAGEDOWN", "DELETE"} else 0
+        self._send([self.Input(type=1, ki=self.Keyboard(wVk=code, dwFlags=extended | (0 if down else 2)))])
+
+    def _button_event(self, button, down):
+        flags = {"left": (2, 4), "right": (8, 16), "middle": (32, 64)}
+        self._send([self.Input(type=0, mi=self.Mouse(dwFlags=flags[button][0 if down else 1]))])
+
+    def emergency_pressed(self):
+        return bool(self.user.GetAsyncKeyState(0x77) & 0x8000)  # F8, independent of foreground.
 
     def scroll(self, amount):
         self._send([self.Input(type=0, mi=self.Mouse(mouseData=(amount*120) & 0xFFFFFFFF, dwFlags=0x800))])
 
 
-class X11Backend:
+class X11Backend(HeldInputs):
     """Used for actual cloud desktop verification; normal Windows uses the class above."""
 
     def __init__(self):
@@ -156,12 +235,16 @@ class X11Backend:
         self.x.XSync.argtypes = [ptr, ctypes.c_int]
         self.x.XGetInputFocus.argtypes = [ptr, ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_int)]
         self.x.XFetchName.argtypes = [ptr, ctypes.c_ulong, ctypes.POINTER(ctypes.c_char_p)]
+        self.x.XGetGeometry.argtypes = [ptr, ctypes.c_ulong, ptr, ptr, ptr, ptr, ptr, ptr, ptr]
+        self.x.XTranslateCoordinates.argtypes = [ptr, ctypes.c_ulong, ctypes.c_ulong,
+                                                ctypes.c_int, ctypes.c_int, ptr, ptr, ptr]
         self.x.XFree.argtypes = [ptr]
         self.x.XQueryPointer.argtypes = [ptr, ctypes.c_ulong] + [ptr]*7
         self.x.XKeysymToKeycode.argtypes = [ptr, ctypes.c_ulong]
         self.x.XKeysymToKeycode.restype = ctypes.c_ubyte
         self.x.XStringToKeysym.argtypes = [ctypes.c_char_p]
         self.x.XStringToKeysym.restype = ctypes.c_ulong
+        self.x.XQueryKeymap.argtypes = [ptr, ptr]
         self.x.XGetKeyboardMapping.argtypes = [ptr, ctypes.c_ubyte, ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
         self.x.XGetKeyboardMapping.restype = ctypes.POINTER(ctypes.c_ulong)
         self.x.XChangeKeyboardMapping.argtypes = [ptr, ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_ulong), ctypes.c_int]
@@ -169,6 +252,7 @@ class X11Backend:
         self.t.XTestFakeButtonEvent.argtypes = [ptr, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
         self.t.XTestFakeKeyEvent.argtypes = [ptr, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
         self.lock = threading.RLock()
+        self._input_state()
 
     def foreground(self):
         window, revert = ctypes.c_ulong(), ctypes.c_int()
@@ -178,7 +262,16 @@ class X11Backend:
         if window.value > 1 and self.x.XFetchName(self.display, window, ctypes.byref(name)) and name.value:
             title = name.value.decode("utf-8", "replace")
             self.x.XFree(name)
-        return Foreground(handle=window.value, pid=0, application="X11:"+title.split(" — ")[0], title=title[:1000])
+        bounds = None
+        root, child = ctypes.c_ulong(), ctypes.c_ulong()
+        x, y, rx, ry = (ctypes.c_int() for _ in range(4))
+        width, height, border, depth = (ctypes.c_uint() for _ in range(4))
+        if window.value > 1 and self.x.XGetGeometry(self.display, window.value, ctypes.byref(root), ctypes.byref(x),
+                ctypes.byref(y), ctypes.byref(width), ctypes.byref(height), ctypes.byref(border), ctypes.byref(depth)):
+            if self.x.XTranslateCoordinates(self.display, window.value, self.root, 0, 0,
+                    ctypes.byref(rx), ctypes.byref(ry), ctypes.byref(child)) and width.value and height.value:
+                bounds = Rect(x=rx.value, y=ry.value, width=width.value, height=height.value)
+        return Foreground(handle=window.value, pid=0, application="X11:"+title.split(" — ")[0], title=title[:1000], bounds=bounds)
 
     def cursor(self):
         root, child = ctypes.c_ulong(), ctypes.c_ulong()
@@ -205,20 +298,28 @@ class X11Backend:
                 if double:
                     time.sleep(0.08)
 
-    def key(self, keys):
-        validate_keys(keys)
+    def _key_event(self, key, down):
         names = {"CTRL": "Control_L", "SHIFT": "Shift_L", "ALT": "Alt_L", "ENTER": "Return", "ESC": "Escape",
                  "SPACE": "space", "BACKSPACE": "BackSpace", "DELETE": "Delete", "PAGEUP": "Prior", "PAGEDOWN": "Next"}
         with self.lock:
-            codes = [self.x.XKeysymToKeycode(self.display, self.x.XStringToKeysym(names.get(k, k.title() if len(k)>1 else k.lower()).encode()))
-                     for k in keys]
-            if not all(codes):
+            name = names.get(key, key.title() if len(key)>1 else key.lower())
+            code = self.x.XKeysymToKeycode(self.display, self.x.XStringToKeysym(name.encode()))
+            if not code:
                 raise ValueError("この画面のキーボードにないキーです。")
-            for code in codes:
-                self.t.XTestFakeKeyEvent(self.display, code, 1, 0)
-            for code in reversed(codes):
-                self.t.XTestFakeKeyEvent(self.display, code, 0, 0)
+            self.t.XTestFakeKeyEvent(self.display, code, int(down), 0)
             self.x.XSync(self.display, 0)
+
+    def _button_event(self, button, down):
+        with self.lock:
+            self.t.XTestFakeButtonEvent(self.display, {"left": 1, "middle": 2, "right": 3}[button], int(down), 0)
+            self.x.XSync(self.display, 0)
+
+    def emergency_pressed(self):
+        with self.lock:
+            keys = ctypes.create_string_buffer(32)
+            self.x.XQueryKeymap(self.display, keys)
+            code = self.x.XKeysymToKeycode(self.display, 0xffc5)  # F8
+            return bool(keys.raw[code//8] & (1 << (code % 8)))
 
     def type(self, text):
         with self.lock:
@@ -277,8 +378,9 @@ def backend():
 class WindowsRecorder:
     """Low-level hooks only while demonstration is explicitly running; no raw typed text."""
 
-    def __init__(self):
+    def __init__(self, game=False):
         self.events = queue.Queue(maxsize=512)
+        self.game = game
         self.thread = None
         self.thread_id = None
         self.ready = threading.Event()
@@ -316,6 +418,7 @@ class WindowsRecorder:
         class Keyboard(ctypes.Structure):
             _fields_ = [("vk", w.DWORD), ("scan", w.DWORD), ("flags", w.DWORD), ("time", w.DWORD),
                         ("extra", ctypes.c_size_t)]
+        last_move = [0.0]
         def emit(value):
             value["at"] = time.monotonic()
             try:
@@ -325,12 +428,31 @@ class WindowsRecorder:
         def mouse(code, message, pointer):
             if code >= 0:
                 event = ctypes.cast(pointer, ctypes.POINTER(Mouse)).contents
-                if not event.flags & 1 and message == 0x201:
+                if self.game and not event.flags & 1:
+                    buttons = {0x201: ("left", True), 0x202: ("left", False), 0x204: ("right", True),
+                               0x205: ("right", False), 0x207: ("middle", True), 0x208: ("middle", False)}
+                    if message in buttons:
+                        button, down = buttons[message]
+                        emit({"kind": "button_down" if down else "button_up", "button": button,
+                              "x": event.pt.x, "y": event.pt.y})
+                    elif message == 0x200 and time.monotonic()-last_move[0] >= .1:
+                        last_move[0] = time.monotonic()
+                        emit({"kind": "move", "x": event.pt.x, "y": event.pt.y})
+                elif not event.flags & 1 and message == 0x201:
                     emit({"kind": "click", "x": event.pt.x, "y": event.pt.y})
                 elif not event.flags & 1 and message == 0x20A:
                     emit({"kind": "scroll", "amount": ctypes.c_short(event.mouseData >> 16).value//120})
             return user.CallNextHookEx(None, code, message, pointer)
         def keyboard(code, message, pointer):
+            if self.game and code >= 0 and message in {0x100, 0x104, 0x101, 0x105}:
+                event = ctypes.cast(pointer, ctypes.POINTER(Keyboard)).contents
+                mapping = {13: "ENTER", 9: "TAB", 27: "ESC", 32: "SPACE", 37: "LEFT", 38: "UP",
+                           39: "RIGHT", 40: "DOWN", 16: "SHIFT", 17: "CTRL", 18: "ALT",
+                           160: "SHIFT", 161: "SHIFT", 162: "CTRL", 163: "CTRL", 164: "ALT", 165: "ALT"}
+                key = mapping.get(event.vk, chr(event.vk) if 48 <= event.vk <= 90 else "")
+                if not event.flags & 0x10 and key in KEYS:
+                    emit({"kind": "key_down" if message in {0x100, 0x104} else "key_up", "key": key})
+                return user.CallNextHookEx(None, code, message, pointer)
             if code >= 0 and message in {0x101, 0x105}:
                 event = ctypes.cast(pointer, ctypes.POINTER(Keyboard)).contents
                 if not event.flags & 0x10:
@@ -361,14 +483,15 @@ class WindowsRecorder:
 
 
 class X11Recorder:
-    def __init__(self):
+    def __init__(self, game=False):
         self.events = queue.Queue(maxsize=512)
+        self.game = game
         self.error = None
         self.thread = None
         self.context = None
 
     def start(self):
-        from Xlib import X, display
+        from Xlib import XK, X, display
         from Xlib.ext import record
         from Xlib.protocol import rq
         self.control = display.Display()
@@ -378,8 +501,9 @@ class X11Recorder:
         self.context = self.listener.record_create_context(0, [record.AllClients], [{
             "core_requests": (0, 0), "core_replies": (0, 0), "ext_requests": (0, 0, 0, 0),
             "ext_replies": (0, 0, 0, 0), "delivered_events": (0, 0),
-            "device_events": (X.KeyPress, X.ButtonPress), "errors": (0, 0),
+            "device_events": (X.KeyPress, X.MotionNotify if self.game else X.ButtonPress), "errors": (0, 0),
             "client_started": False, "client_died": False}])
+        last_move = [0.0]
         def receive(reply):
             if reply.category != record.FromServer or reply.client_swapped or not reply.data:
                 return
@@ -387,7 +511,22 @@ class X11Recorder:
             while data:
                 event, data = rq.EventField(None).parse_binary_value(data, self.listener.display, None, None)
                 value = None
-                if event.type == X.ButtonPress:
+                if self.game and event.type in {X.KeyPress, X.KeyRelease}:
+                    symbol = self.control.keycode_to_keysym(event.detail, 0)
+                    names = {XK.string_to_keysym(name): key for name, key in {
+                        "Up": "UP", "Down": "DOWN", "Left": "LEFT", "Right": "RIGHT", "space": "SPACE",
+                        "Return": "ENTER", "Escape": "ESC", "Shift_L": "SHIFT", "Control_L": "CTRL", "Alt_L": "ALT"}.items()}
+                    key = names.get(symbol, chr(symbol).upper() if 32 <= symbol < 127 else "")
+                    if key in KEYS:
+                        value = {"kind": "key_down" if event.type == X.KeyPress else "key_up", "key": key}
+                elif self.game and event.type in {X.ButtonPress, X.ButtonRelease} and event.detail in {1, 2, 3}:
+                    value = {"kind": "button_down" if event.type == X.ButtonPress else "button_up",
+                             "button": {1: "left", 2: "middle", 3: "right"}[event.detail],
+                             "x": event.root_x, "y": event.root_y}
+                elif self.game and event.type == X.MotionNotify and time.monotonic()-last_move[0] >= .1:
+                    last_move[0] = time.monotonic()
+                    value = {"kind": "move", "x": event.root_x, "y": event.root_y}
+                elif event.type == X.ButtonPress:
                     if event.detail == 1:
                         value = {"kind": "click", "x": event.root_x, "y": event.root_y}
                     elif event.detail in {4, 5}:
@@ -414,5 +553,5 @@ class X11Recorder:
             self.context = None
 
 
-def recorder():
-    return WindowsRecorder() if os.name == "nt" else X11Recorder()
+def recorder(game=False):
+    return WindowsRecorder(game=game) if os.name == "nt" else X11Recorder(game=game)
