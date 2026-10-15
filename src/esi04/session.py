@@ -1,6 +1,7 @@
 """ESI-04 state owner: dialogue, objects and summaries commit as one durable change."""
 
 import copy
+import json
 import re
 from typing import Literal
 
@@ -39,7 +40,39 @@ class Session(PreviousSession):
 
     def __init__(self, *args, **kwargs):
         self.cognition = Cognition()
+        self._history_ready = False
         super().__init__(*args, **kwargs)
+
+    def _write(self, events=()):
+        with self.store.lock, self.store.db:
+            super()._write(events)
+            if self._history_ready:
+                for kind, payload in events:
+                    if kind == "turn_state":
+                        turn = payload["turn"]
+                        self.store.db.execute("INSERT OR REPLACE INTO esi04_conversations VALUES (?,?,?)",
+                                              (turn["id"], turn["epoch"], json.dumps(turn, ensure_ascii=False)))
+
+    def checkpoint(self, initial=False):
+        # Event-log compaction must never discard the only remaining transcript.
+        # This hook also runs during the inherited constructor, before its first
+        # checkpoint can compact a pre-0.4.1 save.
+        with self.lock, self.store.lock, self.store.db:
+            self.store.db.execute("CREATE TABLE IF NOT EXISTS esi04_conversations "
+                                  "(id TEXT PRIMARY KEY, epoch INTEGER NOT NULL, payload TEXT NOT NULL)")
+            if not self._history_ready:
+                self.store.db.execute("""
+                    INSERT OR REPLACE INTO esi04_conversations
+                    SELECT json_extract(payload,'$.turn.id'),json_extract(payload,'$.turn.epoch'),
+                           json_extract(payload,'$.turn') FROM records
+                    WHERE kind='turn_state' ORDER BY seq
+                """)
+            self.store.db.executemany("INSERT OR REPLACE INTO esi04_conversations VALUES (?,?,?)",
+                                     [(turn["id"], turn["epoch"], json.dumps(turn, ensure_ascii=False))
+                                      for turn in self.turns.values()])
+            result = super().checkpoint(initial)
+        self._history_ready = True
+        return result
 
     @property
     def agency(self):

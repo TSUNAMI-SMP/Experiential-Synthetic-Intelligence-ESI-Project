@@ -97,6 +97,7 @@ class Runtime:
             self._status(name, "")
         self._status("asr_device", {})
         self._status("audio_input", {})
+        self._status("audio_errors", {})
         self.accepting = True
         self.thread = threading.Thread(target=self._loop, name="esi02-owner", daemon=True)
         self.thread.start()
@@ -189,6 +190,15 @@ class Runtime:
             self.session.status[name] = value
             if isinstance(value, str) and value.startswith("failed"):
                 self.session.status["error"] = f"{name}：{value.removeprefix('failed: ')}"
+                if name in {"asr", "vad", "microphone"}:
+                    self.session.status.setdefault("audio_errors", {})[name] = self.session.status["error"]
+                    self.session.store.append("audio_processing_error", {"component": name, "error": value[:1000]})
+            elif (name in {"asr", "vad", "microphone"} and isinstance(value, str)
+                  and value.startswith(("ready", "running"))):
+                errors = self.session.status.setdefault("audio_errors", {})
+                old_error = errors.pop(name, None)
+                if old_error and self.session.status.get("error") == old_error:
+                    self.session.status["error"] = next(reversed(errors.values()), "")
 
     def _is_current(self, turn_id):
         return bool(

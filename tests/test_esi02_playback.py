@@ -114,13 +114,16 @@ def test_cancel_during_output_closes_mouth_and_does_not_report_success(tmp_path,
     assert observed == [0] and meter.level() == 0
 
 
-def test_output_failure_propagates_and_clears_meter(tmp_path, monkeypatch):
+def test_output_underflow_keeps_speaking_and_reports_discontinuity(tmp_path, monkeypatch):
     path = tmp_path / "audio.wav"
     sf.write(path, np.ones(1600), 16000)
     meter = playback.PlaybackMeter()
-    install_stream(monkeypatch, status="output underflow")
-    with pytest.raises(RuntimeError, match="途切れ"):
-        playback.play_wave(path, meter=meter)
+    flags = sd.CallbackFlags()
+    flags.output_underflow = True
+    install_stream(monkeypatch, status=flags)
+    route = {}
+    assert playback.play_wave(path, meter=meter, routing=route)
+    assert route["playback_underflows"] > 0
     assert meter.level() == 0
 
 

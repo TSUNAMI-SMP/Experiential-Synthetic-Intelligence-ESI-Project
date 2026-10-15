@@ -6,9 +6,11 @@ from PySide6.QtWidgets import QFileDialog, QLabel, QScrollArea
 
 from esi02.avatar_assets import BUNDLED_MODEL as PREVIOUS_MODEL
 from esi03.gui import Window as PreviousWindow
+from esi04 import __version__
 from esi04.computer_gui import ComputerPanel, ComputerSupervisor
 from esi04.desktop import BUNDLED_MODEL, DesktopViews
 from esi04.growth_gui import GrowthPanel
+from esi04.history_gui import HistoryPanel, choose_recovery
 from esi04.migration import migrate_esi03, validate_save
 from esi04.runtime import Runtime
 from esi04.session import Session
@@ -17,7 +19,7 @@ from esi04.world_gui import WorldPanel
 
 class Window(PreviousWindow):
     release_name = "ESI-04"
-    heading_text = "ESI-04  |  見て、試して、自分で活動を選ぶ"
+    heading_text = f"ESI-04 {__version__}  |  見て、試して、自分で活動を選ぶ"
     window_title = "ESI-04 — 会話・空間・画面・PC操作"
     desktop_filename = "esi04-desktop.json"
     growth_panel_class = GrowthPanel
@@ -39,9 +41,14 @@ class Window(PreviousWindow):
         return WorldPanel(self)
 
     def __init__(self, *args, **kwargs):
+        self.history_panel = None
         self.computer_supervisor, self.computer_panel, self.computer_scroll = None, None, None
         super().__init__(*args, **kwargs)
         self.setup_computer()
+        self.history_panel = HistoryPanel(self)
+        self.tabs.addTab(self.history_panel, "会話履歴・セーブ")
+        self.tabs.currentChanged.connect(lambda index: self.history_panel.reload()
+                                        if self.tabs.widget(index) is self.history_panel else None)
 
     def setup_computer(self):
         if self.computer_supervisor:
@@ -95,6 +102,8 @@ class Window(PreviousWindow):
         super().finish_save_switch(candidate)
         if hasattr(self, "computer_panel"):
             self.setup_computer()
+        if self.history_panel:
+            self.history_panel.reload()
 
     def set_model(self, path):
         path = BUNDLED_MODEL if path in {BUNDLED_MODEL, PREVIOUS_MODEL} else path
@@ -115,8 +124,16 @@ class Window(PreviousWindow):
                                              str(self.session.store.path.parent), "ESIのセーブ (*.sqlite3 *.db)")
         if not path:
             return
+        self.open_selected_save(path)
+
+    def recover_history(self):
+        path = choose_recovery(self, getattr(self.services, "root", Path.cwd()), self.session.store.path)
+        if path:
+            self.open_selected_save(path)
+
+    def open_selected_save(self, path):
         try:
-            if validate_save(path)["release"] == "ESI-03":
+            if validate_save(path)["release"] != "ESI-04":
                 destination, _ = QFileDialog.getSaveFileName(self, "ESI-04へのコピーを保存",
                     str(Path(path).with_name(Path(path).stem+"-ESI-04.sqlite3")), "ESI-04のセーブ (*.sqlite3)")
                 if not destination:

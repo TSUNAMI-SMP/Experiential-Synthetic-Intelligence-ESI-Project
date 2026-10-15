@@ -45,7 +45,7 @@ class AcceleratedPerception(Perception):
                     self.settings.asr_model_path, device="cuda", device_index=0,
                     compute_type=compute, num_workers=1, local_files_only=True,
                 )
-            except (RuntimeError, OSError) as exc:
+            except (RuntimeError, OSError, ValueError) as exc:
                 attempt.update(state="failed", error=str(exc)[:500])
                 last = exc
                 continue
@@ -71,7 +71,7 @@ class AcceleratedPerception(Perception):
             # int8/float16 may fail on a GPU even when device enumeration succeeds.
             self.cuda_types = [t for t in ("float16", "float32", "int8_float16") if t in supported]
             return self._cuda()
-        except (RuntimeError, OSError, ImportError) as exc:
+        except (RuntimeError, OSError, ValueError, ImportError) as exc:
             if self.device_mode == "cuda":
                 raise RuntimeError(f"GPU音声認識を開始できません：{exc}") from exc
             self.fallback_reason = str(exc)
@@ -89,7 +89,12 @@ class AcceleratedPerception(Perception):
         native = getattr(self.model, "model", None)
         unload = getattr(native, "unload_model", None)
         if unload:
-            unload()
+            try:
+                unload()
+            except (RuntimeError, OSError, ValueError):
+                # A failed CUDA context may also reject cleanup. Still release
+                # the Python owner and try the remaining precision/CPU options.
+                pass
         self.model = None
 
     def _transcribe(self, audio):
@@ -97,7 +102,7 @@ class AcceleratedPerception(Perception):
             try:
                 result = self._decode(audio)
                 break
-            except (RuntimeError, OSError) as exc:
+            except (RuntimeError, OSError, ValueError) as exc:
                 if self.actual_device != "cuda":
                     raise
                 if self.attempts:
@@ -107,11 +112,15 @@ class AcceleratedPerception(Perception):
                     raise
                 self.fallback_reason = str(exc)
                 self._release_failed_cuda()
+                if any(term in str(exc).lower() for term in ("out of memory", "failed to allocate", "cuda_error_memory_allocation")):
+                    # Trying float32 after a float16 allocation failure doubles
+                    # memory pressure while language/vision models share VRAM.
+                    self.cuda_types.clear()
                 if self.cuda_types:
                     try:
                         self.model = self._cuda()
                         continue
-                    except (RuntimeError, OSError) as next_error:
+                    except (RuntimeError, OSError, ValueError) as next_error:
                         self.fallback_reason = str(next_error)
                 self.model = self._cpu()
         if self.actual_device == "cuda" and self.attempts:

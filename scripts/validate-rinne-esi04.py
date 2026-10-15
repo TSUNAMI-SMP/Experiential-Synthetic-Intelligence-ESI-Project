@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import QEvent, QTimer
+from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
 
 from esi02.desktop import AvatarWindow
@@ -34,6 +35,15 @@ ONLY = {"left_arm": {"Arm_viewer_left"}, "right_arm": {"Arm_viewer_right"},
         "left_brow_lift": {"Brow_viewer_left"}, "right_brow_lift": {"Brow_viewer_right"},
         "left_brow_angle": {"Brow_viewer_left"}, "right_brow_angle": {"Brow_viewer_right"},
         "smile": {"Mouth_closed"}, "frown": {"Mouth_closed"}}
+
+
+def visible_mouth_pixels(frame):
+    w, h = frame.width(), frame.height()
+    mouth = frame.copy(round(w*.47), round(h*.16), round(w*.06), round(h*.03))
+    mouth = mouth.convertToFormat(QImage.Format_RGBA8888)
+    values = np.array(mouth.constBits()).reshape(mouth.height(), mouth.bytesPerLine())
+    values = values[:, :mouth.width()*4].reshape(mouth.height(), mouth.width(), 4)
+    return int(((values[:, :, :3].mean(axis=2)<170) & (values[:, :, 3]>180)).sum())
 
 
 class FixedCanvas(AudioLiveCanvas):
@@ -87,7 +97,7 @@ def verify(path, output):
             assert all(np.isfinite(value).all() and len(value)>=3 for value in vertices.values())
             digest = hashlib.sha256(bytes(frame.constBits())).hexdigest()
             if phase == "neutral":
-                baseline.update(vertices=vertices, digest=digest)
+                baseline.update(vertices=vertices, digest=digest, mouth_pixels=visible_mouth_pixels(frame))
                 assert frame.pixelColor(0, 0).alpha() == 0
                 for side in ("left", "right"):
                     opened = vertices[f"Eye_viewer_{side}_open"]
@@ -98,6 +108,8 @@ def verify(path, output):
             if phase in ONLY:
                 assert changed == ONLY[phase], f"{phase}: expected {ONLY[phase]}, got {changed}"
                 assert digest != baseline["digest"], phase+" changed no pixels"
+            if phase == "speaking":
+                assert visible_mouth_pixels(frame) > baseline["mouth_pixels"]+2, "The mouth mesh moved but was hidden behind another drawing"
             if phase in {"left_arm", "right_arm", "both_arms", "left_arm_out", "right_arm_out", "both_arms_out"}:
                 assert all(frame.pixelColor(x, y).alpha() == 0
                            for x in (0, frame.width()-1) for y in range(frame.height())), "Hand clipped at canvas edge"

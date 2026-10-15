@@ -270,6 +270,9 @@ class Microphone:
             "speech_intervals": 0,
             "recognized_intervals": 0,
             "asr_busy": False,
+            "failed_intervals": 0,
+            "dropped_intervals": 0,
+            "last_asr_error": "",
         }
         self.asr_started = None
         self.reported_at = 0.0
@@ -285,6 +288,7 @@ class Microphone:
         with self.telemetry_lock:
             self.telemetry["asr_seconds"] = now - self.asr_started if self.asr_started else 0.0
             self.telemetry["seconds_since_packet"] = now - self.last_packet if self.last_packet else None
+            self.telemetry["queued_intervals"] = self.segments.qsize()
             snapshot = dict(self.telemetry)
         self.on_status("audio_input", snapshot)
 
@@ -352,6 +356,8 @@ class Microphone:
                             with self.telemetry_lock:
                                 self.telemetry["speech_intervals"] += 1
                         except queue.Full:
+                            with self.telemetry_lock:
+                                self.telemetry["dropped_intervals"] += 1
                             self.on_status("asr", "overflow: speech interval dropped; bounded ASR queue full")
                         started, wall, contaminated = None, None, False
                     elif not segmenter.frames:
@@ -386,8 +392,12 @@ class Microphone:
                     self.on_event(event)
                     with self.telemetry_lock:
                         self.telemetry["recognized_intervals"] += 1
+                        self.telemetry["last_asr_error"] = ""
                     self.on_status("asr", "ready: microphone interval recognized")
             except Exception as exc:
+                with self.telemetry_lock:
+                    self.telemetry["failed_intervals"] += 1
+                    self.telemetry["last_asr_error"] = f"{type(exc).__name__}: {exc}"[:600]
                 self.on_status("asr", f"failed: {type(exc).__name__}: {exc}")
             finally:
                 with self.telemetry_lock:

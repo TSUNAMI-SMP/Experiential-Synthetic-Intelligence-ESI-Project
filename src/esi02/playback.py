@@ -81,15 +81,19 @@ def play_wave(path, stop_event=None, device=None, routing=None, meter=None):
     finished = threading.Event()
     position = 0
     failure = []
+    underflows = 0
 
     def callback(output, frames, timing, status):
-        nonlocal position
+        nonlocal position, underflows
         output.fill(0)
         if stop_event.is_set():
             raise sd.CallbackAbort
         try:
-            if status:
-                raise RuntimeError(f"音声出力が途切れました：{status}")
+            # PortAudio status flags describe a recovered buffer discontinuity,
+            # not a disconnected device. Aborting here cuts off the first word
+            # (and clears its lip telemetry) on busy WASAPI/ASIO devices.
+            if status and getattr(status, "output_underflow", False):
+                underflows += 1
             count = min(frames, len(audio) - position)
             output[:count] = audio[position : position + count]
             position += count
@@ -123,4 +127,6 @@ def play_wave(path, stop_event=None, device=None, routing=None, meter=None):
                 raise failure[0]
             return not stop_event.is_set() and position == len(audio)
     finally:
+        if routing is not None:
+            routing["playback_underflows"] = underflows
         meter.clear(generation)

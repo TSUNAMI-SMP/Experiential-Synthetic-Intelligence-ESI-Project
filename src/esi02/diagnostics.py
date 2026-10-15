@@ -267,9 +267,11 @@ def runtime_observation(status=None, backend=None, turns=None):
         },
         "audio_input": {
             k: audio[k]
-            for k in ("rms", "device_name", "recognized_intervals", "seconds_since_packet")
+            for k in ("rms", "device_name", "recognized_intervals", "seconds_since_packet", "asr_busy",
+                      "queued_intervals", "failed_intervals", "dropped_intervals", "last_asr_error")
             if k in audio
         },
+        "audio_errors": dict(status.get("audio_errors", {})),
         "generated_chunks": len(chunks),
         "completed_playback_chunks": sum(bool(c.get("played")) for c in chunks),
         "physical_sound_confirmed": False,

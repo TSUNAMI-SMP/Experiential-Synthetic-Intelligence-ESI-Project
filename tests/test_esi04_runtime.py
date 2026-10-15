@@ -25,6 +25,26 @@ def wait_for(predicate, timeout=4):
     raise AssertionError("ESI-04 owner did not reach the expected state")
 
 
+def test_successful_recognition_clears_its_old_error_but_keeps_unrelated_errors(tmp_path):
+    session = Session(tmp_path / "save.db", Settings(idle_deliberation=False))
+    runtime = Runtime(session)
+    try:
+        runtime._status("asr", "failed: GPU decode failed")
+        assert session.status["error"] == "asr：GPU decode failed"
+        runtime._status("asr", "transcribing")
+        runtime._status("asr", "ready: microphone interval recognized")
+        assert not session.status["error"]
+        runtime._status("asr", "failed: another decode failure")
+        runtime._status("error", "voice：speaker disconnected")
+        runtime._status("asr", "ready: microphone interval recognized")
+        assert session.status["error"] == "voice：speaker disconnected"
+        assert not session.status["audio_errors"]
+        assert session.store.db.execute("SELECT COUNT(*) FROM records WHERE kind='audio_processing_error'").fetchone()[0] == 2
+    finally:
+        runtime.stop()
+        session.close()
+
+
 class NoMemoryModel:
     def extract(self, *args):
         return {"items": [], "rejected": []}

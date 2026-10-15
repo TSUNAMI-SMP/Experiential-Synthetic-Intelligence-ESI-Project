@@ -6,7 +6,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from PySide6.QtCore import QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -259,6 +259,8 @@ class Window(QMainWindow):
         layout.addLayout(input_row)
         self.error = QLabel()
         self.error.setWordWrap(True)
+        self.error.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.error.setMinimumHeight(32)
         self.error.setStyleSheet("color: #f9b4bf")
         layout.addWidget(self.error)
         diagnostic_row = QHBoxLayout()
@@ -822,6 +824,9 @@ class Window(QMainWindow):
         self.capture.setText(
             f"マイク：{audio.get('device_name', '未接続')} / 聞き取り：{audio.get('recognized_intervals', 0)}件"
             + (" / 音声を言葉に変換中" if audio.get("asr_busy") else "")
+            + (f" / 待機 {audio['queued_intervals']}件" if audio.get("queued_intervals") else "")
+            + (f" / 認識失敗 {audio['failed_intervals']}件" if audio.get("failed_intervals") else "")
+            + (f" / 入力待ち超過 {audio['dropped_intervals']}件" if audio.get("dropped_intervals") else "")
         )
         memory = view["memory"]
         self.memory_summary.setText(
@@ -875,10 +880,15 @@ class Window(QMainWindow):
             or self.desktop.problem
             or model.problem
         )
+        if not problem and status.get("phase") == "failed":
+            problem = next((turn.get("error", "") for turn in reversed(view["turns"])
+                            if turn["stage"] == "failed" and turn.get("error")), "")
+            problem = problem or "直前の処理に失敗しました。入力し直すか、停止して再開してください。診断に処理状況を保存できます。"
         if problem:
             self.error.setText(problem)
         else:
             self.error.clear()
+        self.phase.setToolTip(problem or phase_text)
         self.desktop.refresh(running, mic, symbol, phase_text, problem)
         self.desktop.microphone.start_action.setEnabled(not preparing and (self.connection_ready or running))
         self.desktop.microphone.mic_action.setEnabled(not preparing and self.connection_ready)

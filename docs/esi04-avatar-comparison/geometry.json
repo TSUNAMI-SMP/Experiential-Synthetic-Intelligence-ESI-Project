@@ -1,6 +1,6 @@
 {
   "renderer": "live2d-py",
-  "model": "src/esi/resources/rinne-el04/rinne-el.model3.json",
+  "model": "/workspace/Experiential-Synthetic-Intelligence-ESI-Project/src/esi/resources/rinne-el04/rinne-el.model3.json",
   "phases": [
     {
       "phase": "neutral",
@@ -98,7 +98,7 @@
       "changed": [
         "Mouth_open"
       ],
-      "digest": "cb7e63289e5a98627bf29a65a8942cd42dda0864fe8e9013657331f183979721"
+      "digest": "02d04f5b6096afd85e8aa388497393602c3fc954d3fcc34b0c0e6d8954b5b901"
     },
     {
       "phase": "left_blink",

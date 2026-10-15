@@ -1,4 +1,4 @@
-"""Consistent ESI-03 copy migration; preserve the source and its full history."""
+"""Consistent ESI-02/03 copy migration; preserve the source and its full history."""
 
 import hashlib
 import sqlite3
@@ -8,7 +8,9 @@ from pathlib import Path
 from esi.models import uid, utc
 from esi.storage import Store
 from esi02.migration import _publish_new
+from esi02.session import inspect_database as inspect_esi02
 from esi02.world import Point
+from esi03.migration import migrate_esi02
 from esi03.session import Session as PreviousSession
 from esi03.session import inspect_database as inspect_previous
 from esi04.config import Settings
@@ -28,16 +30,21 @@ def validate_save(path):
         return {"release": "ESI-04", "settings": inspect_database(path)}
     if "esi03_settings" in keys:
         return {"release": "ESI-03", "settings": inspect_previous(path)}
-    raise ValueError("ESI-03かESI-04のセーブを選んでください。旧版はまずESI-03へコピー移行してください。")
+    if "esi02_settings" in keys:
+        return {"release": "ESI-02", "settings": inspect_esi02(path)}
+    raise ValueError("ESI-02、ESI-03、ESI-04のセーブを選んでください。")
 
 
 def migrate_esi03(source, destination, settings=None):
     source, destination = Path(source).resolve(), Path(destination).resolve()
     if source == destination or destination.exists():
-        raise FileExistsError("ESI-03を保持するため、新しい移行先を選んでください。")
-    old_settings = inspect_previous(source)
+        raise FileExistsError("元のセーブを保持するため、新しい移行先を選んでください。")
+    description = validate_save(source)
+    if description["release"] == "ESI-04":
+        raise ValueError("ESI-04はコピー移行せず、そのまま選んで開けます。")
+    old_settings, source_release = description["settings"], description["release"]
     settings = settings or Settings.model_validate(old_settings.model_dump() | {"release": "ESI-04"})
-    archive = destination.with_name(destination.stem+".esi03-original.sqlite3")
+    archive = destination.with_name(destination.stem+"."+source_release.lower().replace("-", "")+"-original.sqlite3")
     if archive.exists():
         raise FileExistsError("元セーブの保存先が存在します。新しい移行先を選んでください。")
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -61,6 +68,10 @@ def migrate_esi03(source, destination, settings=None):
         finally:
             target_db.close()
             source_db.close()
+        if source_release == "ESI-02":
+            intermediate = Path(temporary) / "intermediate-esi03.sqlite3"
+            migrate_esi02(converted, intermediate)
+            converted = intermediate
         old = PreviousSession(converted)
         try:
             old.checkpoint()
@@ -82,8 +93,8 @@ def migrate_esi03(source, destination, settings=None):
             if item.last_asked is not None:
                 experience.state.question_contexts[item.id] = experience.context_signature(item)
         experience.recover()
-        experience.trace("migration", "ESI-03の履歴・人格・知識・身体を元ファイルを残してコピー移行",
-                          "migration:"+digest, source_release="ESI-03", position_adjusted_from=relocated)
+        experience.trace("migration", source_release+"の履歴・人格・知識・身体を元ファイルを残してコピー移行",
+                          "migration:"+digest, source_release=source_release, position_adjusted_from=relocated)
         active = state["motivation"]["active_id"]
         for action in state["motivation"]["actions"]:
             if action["id"] == active:
@@ -98,7 +109,7 @@ def migrate_esi03(source, destination, settings=None):
             writer.set_meta("parent_branch_id", parent_branch)
             writer.set_meta("branch_id", uid())
             writer.set_meta("esi04_import", {"source": str(source), "archive": str(archive),
-                                             "archive_sha256": digest, "at": utc()})
+                                             "source_release": source_release, "archive_sha256": digest, "at": utc()})
             writer.snapshot(state, initial=True)
         finally:
             writer.close()

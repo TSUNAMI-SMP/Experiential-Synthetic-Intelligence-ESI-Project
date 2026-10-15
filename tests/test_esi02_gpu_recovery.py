@@ -94,3 +94,50 @@ def test_startup_diagnostic_selects_gpu_records_without_conversation(tmp_path):
     assert result["logs"][1]["verbosity"] == 3
     assert not result["logs"][1]["placement_records_found"]
     assert "PRIVATE" not in str(result)
+
+
+@pytest.mark.parametrize("failure", [ValueError("unsupported CUDA compute format"), RuntimeError("CUDA out of memory")])
+def test_lazy_gpu_failure_and_failed_cleanup_redecode_the_same_audio_on_cpu(tmp_path, monkeypatch, failure):
+    import ctranslate2
+    import faster_whisper
+
+    loaded, events, decoded = [], [], []
+    monkeypatch.setattr(ctranslate2, "get_cuda_device_count", lambda: 1)
+    monkeypatch.setattr(ctranslate2, "get_supported_compute_types", lambda *args: {"float16", "float32"})
+
+    class Whisper:
+        def __init__(self, path, **kwargs):
+            self.device = kwargs["device"]
+            loaded.append((self.device, kwargs["compute_type"]))
+            self.model = SimpleNamespace(unload_model=lambda: (_ for _ in ()).throw(RuntimeError("CUDA context failed")))
+
+        def transcribe(self, audio, **kwargs):
+            decoded.append((self.device, audio))
+            if self.device == "cuda":
+                def failed():
+                    raise failure
+                    yield
+                return failed(), None
+            return iter(["decoded same input"]), "info"
+
+    monkeypatch.setattr(faster_whisper, "WhisperModel", Whisper)
+    perception = AcceleratedPerception(Settings(), tmp_path, events.append)
+    perception.model = perception._create_model()
+    audio = [.1, .2, .3]
+    assert perception._transcribe(audio) == (["decoded same input"], "info")
+    assert all(data is audio for _, data in decoded)
+    assert events[-1]["device"] == "cpu" and events[-1]["verified_inference"]
+    assert str(failure) in events[-1]["fallback_reason"]
+    if "out of memory" in str(failure):
+        assert loaded == [("cuda", "float16"), ("cpu", "int8")]
+    else:
+        assert loaded == [("cuda", "float16"), ("cuda", "float32"), ("cpu", "int8")]
+
+
+def test_explicit_gpu_requirement_reports_a_lazy_error_without_cpu_fallback(tmp_path, monkeypatch):
+    perception = AcceleratedPerception(Settings(asr_device="cuda"), tmp_path)
+    perception.actual_device, perception.compute_type = "cuda", "float16"
+    monkeypatch.setattr(perception, "_decode", lambda _: (_ for _ in ()).throw(ValueError("unsupported format")))
+    monkeypatch.setattr(perception, "_cpu", lambda: pytest.fail("Explicit CUDA must remain explicit"))
+    with pytest.raises(ValueError, match="unsupported format"):
+        perception._transcribe([.1])

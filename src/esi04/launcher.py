@@ -4,15 +4,18 @@ import os
 from pathlib import Path
 
 from PySide6.QtCore import QLockFile, QTimer
-from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QPushButton
 
 from esi02.launcher import read_preferences
 from esi02.setup_assets import prepare_binaries
 from esi03.launcher import Launcher as PreviousLauncher
+from esi04 import __version__
 from esi04.characters import Characters
 from esi04.config import Settings
 from esi04.gui import Window
+from esi04.history_gui import choose_recovery
 from esi04.migration import migrate_esi03, validate_save
+from esi04.save_history import previous_source, saved_path
 from esi04.services import Services
 from esi04.session import Session, inspect_database
 from esi04.setup_assets import prepare_assets, prepare_vision, vision_missing
@@ -22,10 +25,13 @@ class Launcher(PreviousLauncher):
     data_directory = "esi04"
     config_filename = "esi04-windows.toml"
     window_title = "ESI-04を起動"
-    heading_text = "ESI-04  |  会話・画面・空間の準備"
+    heading_text = f"ESI-04 {__version__}  |  会話・画面・空間の準備"
 
     def __init__(self, root, services_factory=Services, window_factory=Window):
         super().__init__(root, services_factory, window_factory)
+        if self.preferences.save_path:
+            self.save_path = saved_path(self.root, self.preferences.save_path)
+            self.update_save_label()
         if not self.preferences.aivis_executable:
             try:
                 previous = read_preferences(self.root / "data/esi03/launcher.json")
@@ -38,6 +44,26 @@ class Launcher(PreviousLauncher):
         self.prepare.setToolTip("会話・音声データは再利用します。画面認識用に追加で約1.55 GBを準備します。")
         self.characters = Characters(self.data / "characters")
         self.refresh_characters()
+        self.recovery_button = QPushButton("以前のセーブ・会話履歴を探す")
+        self.recovery_button.clicked.connect(self.recover_history)
+        self.layout().insertWidget(3, self.recovery_button)
+
+    def save_preferences(self):
+        # Relative paths survive extracting the next ZIP into another folder.
+        from esi02.desktop_preferences import write_json
+
+        if self.preferences_error:
+            raise ValueError(self.preferences_error)
+        values = self.preferences.model_dump()
+        if values["save_path"]:
+            path = saved_path(self.root, values["save_path"])
+            values["save_path"] = str(path.relative_to(self.root)) if path.is_relative_to(self.root) else str(path)
+        write_json(self.preferences_path, values)
+
+    def enabled(self, idle):
+        super().enabled(idle)
+        if hasattr(self, "recovery_button"):
+            self.recovery_button.setEnabled(idle and not self.closing)
 
     def read_config(self, path):
         return Settings.read(path)
@@ -54,10 +80,9 @@ class Launcher(PreviousLauncher):
 
     def migrate_if_needed(self, settings):
         if not self.save_path.exists() and not self.preferences.save_path:
-            preferences = read_preferences(self.root / "data/esi03/launcher.json")
-            source = Path(preferences.save_path or self.root / "data/esi03/session.sqlite3")
-            if source.is_file():
-                self.notify("元のESI-03を保持して、ESI-04へコピー移行しています…")
+            source = previous_source(self.root, "esi03") or previous_source(self.root, "esi02")
+            if source:
+                self.notify("元のセーブを保持して、ESI-04へコピー移行しています…")
                 migrate_esi03(source, self.save_path)
                 return inspect_database(self.save_path)
         return settings
@@ -91,8 +116,16 @@ class Launcher(PreviousLauncher):
                                              "セーブ (*.sqlite3 *.db)")
         if not path:
             return
+        self.open_selected_save(path)
+
+    def recover_history(self):
+        path = choose_recovery(self, self.root, self.save_path)
+        if path:
+            self.open_selected_save(path)
+
+    def open_selected_save(self, path):
         try:
-            if validate_save(path)["release"] == "ESI-03":
+            if validate_save(path)["release"] != "ESI-04":
                 destination, _ = QFileDialog.getSaveFileName(self, "ESI-04へのコピーを保存",
                     str(Path(path).with_name(Path(path).stem+"-ESI-04.sqlite3")), "セーブ (*.sqlite3)")
                 if not destination:
