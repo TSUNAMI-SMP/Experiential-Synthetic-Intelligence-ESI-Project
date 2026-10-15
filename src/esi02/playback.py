@@ -54,6 +54,50 @@ class PlaybackMeter:
 
 
 def play_wave(path, stop_event=None, device=None, routing=None, meter=None):
+    """Retry native formats only if the failed stream submitted no audio."""
+    import sounddevice as sd
+
+    routing = routing if routing is not None else {}
+    attempts = []
+    routing["playback_attempts"] = attempts
+    if device is None:
+        default = sd.default.device[1]
+        device = default if isinstance(default, int) and default >= 0 else None
+    profile, candidates = None, None
+    while True:
+        if stop_event is not None and stop_event.is_set():
+            return False
+        routing["playback_frames_submitted"] = 0
+        attempt = {"sample_rate": None, "channels": None}
+        attempts.append(attempt)
+        try:
+            result = _play_wave_once(path, stop_event, device, routing, meter, profile)
+            attempt.update(sample_rate=routing.get("playback_sample_rate"),
+                           channels=routing.get("playback_channels"), completed=result)
+            return result
+        except sd.PortAudioError as exc:
+            attempt.update(sample_rate=routing.get("playback_sample_rate"),
+                           channels=routing.get("playback_channels"), error=str(exc)[:500], completed=False)
+            if routing["playback_frames_submitted"]:
+                raise  # Never repeat audio that may already have been heard.
+            if candidates is None:
+                details = sd.query_devices(device, "output")
+                native, channels = int(details["default_samplerate"]), int(details["max_output_channels"])
+                failed = (routing.get("playback_sample_rate"), routing.get("playback_channels"))
+                candidates = [(native, count, details["name"]) for count in dict.fromkeys((min(2, channels), 1))
+                              if count > 0 and (native, count) != failed]
+            while candidates:
+                profile = candidates.pop(0)
+                try:
+                    sd.check_output_settings(device=device, samplerate=profile[0], channels=profile[1], dtype="float32")
+                    break
+                except (sd.PortAudioError, ValueError):
+                    continue
+            else:
+                raise
+
+
+def _play_wave_once(path, stop_event=None, device=None, routing=None, meter=None, profile=None):
     import sounddevice as sd
     from scipy.signal import resample_poly
 
@@ -64,7 +108,7 @@ def play_wave(path, stop_event=None, device=None, routing=None, meter=None):
     audio, source_rate = sf.read(path, dtype="float32", always_2d=True)
     if not len(audio) or not np.isfinite(audio).all():
         raise ValueError("再生する音声が空か、不正な値を含んでいます。")
-    rate, channels, name = stream_format(device, "output", source_rate, audio.shape[1])
+    rate, channels, name = profile or stream_format(device, "output", source_rate, audio.shape[1])
     if rate != source_rate:
         divisor = math.gcd(rate, source_rate)
         audio = resample_poly(audio, rate // divisor, source_rate // divisor, axis=0).astype(np.float32)
@@ -97,6 +141,8 @@ def play_wave(path, stop_event=None, device=None, routing=None, meter=None):
             count = min(frames, len(audio) - position)
             output[:count] = audio[position : position + count]
             position += count
+            if routing is not None:
+                routing["playback_frames_submitted"] = position
             start = time.monotonic() + max(0, timing.outputBufferDacTime - timing.currentTime)
             meter.publish(generation, start, count / rate, output[:count])
         except Exception as exc:
@@ -111,7 +157,8 @@ def play_wave(path, stop_event=None, device=None, routing=None, meter=None):
             samplerate=rate,
             channels=channels,
             dtype="float32",
-            blocksize=512,
+            blocksize=0,
+            latency="high",
             callback=callback,
             finished_callback=finished.set,
         ) as output:
@@ -125,6 +172,8 @@ def play_wave(path, stop_event=None, device=None, routing=None, meter=None):
                     raise RuntimeError("音声出力の完了が時間切れになりました。")
             if failure:
                 raise failure[0]
+            if not stop_event.is_set() and position != len(audio):
+                raise RuntimeError("音声の途中で出力機器が停止しました。出力スピーカーを選び直して再試行してください。")
             return not stop_event.is_set() and position == len(audio)
     finally:
         if routing is not None:

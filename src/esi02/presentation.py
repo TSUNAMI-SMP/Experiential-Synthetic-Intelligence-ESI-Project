@@ -8,6 +8,7 @@ PHASES = {
     "synthesizing": ("speak", "凛音エルの声を作っています"),
     "playing": ("speak", "音声を再生しています"),
     "failed": ("error", "処理に問題が起きています"),
+    "speech_failed": ("error", "返答文はできましたが、音声に問題があります"),
 }
 BODY_SYMBOLS = {
     "rest": "rest",

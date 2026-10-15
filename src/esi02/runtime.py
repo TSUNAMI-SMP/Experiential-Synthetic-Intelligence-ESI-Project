@@ -6,14 +6,17 @@ import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
+import httpx
+
 from esi.adapters import TTS
 from esi.audio import Microphone
 from esi.models import Observation
-from esi02.dialogue import Cancellation, Cancelled, DialogueLLM
+from esi02.dialogue import Cancellation, Cancelled, DialogueLLM, Sentences
 from esi02.memory_llm import MemoryLLM
 from esi02.perception import AcceleratedPerception
 from esi02.playback import PlaybackMeter, play_wave
 from esi02.session import TERMINAL
+from esi02.speech import SpeechFailure, issue
 
 
 class Runtime:
@@ -98,6 +101,8 @@ class Runtime:
         self._status("asr_device", {})
         self._status("audio_input", {})
         self._status("audio_errors", {})
+        self._status("speech_problem", {})
+        self._status("speech_recovery", {})
         self.accepting = True
         self.thread = threading.Thread(target=self._loop, name="esi02-owner", daemon=True)
         self.thread.start()
@@ -166,8 +171,12 @@ class Runtime:
             "accepted_at": time.monotonic(),
             "first_token": None,
             "first_voice": None,
+            "speech_failed": False,
         }
+        self._status("speech_problem", {})
+        self._status("speech_recovery", {})
         self._status("phase", "queued")
+        self._status("control_error", "")
 
     def _cancel_memory(self):
         if self.memory_task:
@@ -210,6 +219,9 @@ class Runtime:
     def _handle(self, name, data):
         if name == "text":
             self._new_turn(data)
+        elif name == "retry_voice":
+            self._retry_voice(data)
+            self._status("control_error", "")
         elif name == "observe":
             if not isinstance(data, Observation):
                 raise ValueError("音声の観測形式が正しくありません。")
@@ -280,16 +292,19 @@ class Runtime:
                 if self.current["first_token"] is None:
                     self.current["first_token"] = time.monotonic() - self.current["accepted_at"]
             else:
-                if len(self.voice) >= self.settings.speech_capacity:
+                if len(self.voice) >= self.settings.speech_capacity and not self.current.get("speech_failed"):
                     raise RuntimeError("音声の処理待ちが上限に達しました。返答を中止します。")
                 index = self.current["sentences"]
                 self.current["sentences"] += 1
-                self.voice.append(
-                    {"turn_id": turn_id, "index": index, "text": value, "stop": self.current["voice_stop"]}
-                )
+                plan = self.session.turns[turn_id].get("speech_plan", []) + [{"index": index, "text": value}]
+                self.session.update_turn(turn_id, speech_plan=plan)
+                if not self.current.get("speech_failed"):
+                    self.voice.append(
+                        {"turn_id": turn_id, "index": index, "text": value, "stop": self.current["voice_stop"]}
+                    )
         elif name == "voice_phase":
             turn_id, phase = data
-            if self._is_current(turn_id):
+            if self._is_current(turn_id) and not self.current.get("speech_failed"):
                 self.session.update_turn(turn_id, stage=phase)
                 self._status("phase", phase)
                 if phase == "playing" and self.current["first_voice"] is None:
@@ -329,7 +344,9 @@ class Runtime:
         phase_event = "request_voice_phase" if item.get("request") else "voice_phase"
         self._emit(phase_event, (turn_id, "synthesizing"))
         started = time.monotonic()
-        audio = self.tts.synthesize(item["text"], f"{turn_id}-{item['index']}")
+        audio = item.get("cached_audio")
+        if audio is None:
+            audio = self._synthesize(item)
         synthesized = time.monotonic() - started
         if stop.is_set():
             raise Cancelled()
@@ -346,7 +363,14 @@ class Runtime:
             )
             try:
                 self._emit(phase_event, (turn_id, "playing"))
-                audio["played"] = bool(self.playback(audio["path"], stop, self.output_device, audio))
+                try:
+                    audio["played"] = bool(self.playback(audio["path"], stop, self.output_device, audio))
+                    if not audio["played"] and not stop.is_set():
+                        raise RuntimeError("スピーカーへの再生が完了しませんでした。")
+                except Exception as exc:
+                    if stop.is_set():
+                        raise Cancelled() from exc
+                    raise SpeechFailure(exc, "playback", audio) from exc
             finally:
                 self.output_active.clear()
         if stop.is_set():
@@ -359,6 +383,83 @@ class Runtime:
             "synthesis_seconds": synthesized,
             "external_evidence": False,
         }
+
+    def _synthesize(self, item):
+        stop = item["stop"]
+        for attempt in range(2):
+            if stop.is_set():
+                raise Cancelled()
+            try:
+                return self.tts.synthesize(item["text"], f"{item['turn_id']}-{item['index']}")
+            except Cancelled:
+                raise
+            except Exception as exc:
+                problem = issue(exc, "synthesis")
+                retry = False
+                if not attempt:
+                    if problem["kind"] == "memory":
+                        release = getattr(self.perception, "release_gpu_for_speech", None)
+                        retry = bool(problem["gpu_memory"] and release and release(stop))
+                    else:
+                        retry = isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)) or problem["http_status"] in {429, 502, 503, 504}
+                if not retry:
+                    if stop.is_set():
+                        raise Cancelled() from exc
+                    raise SpeechFailure(exc, "synthesis") from exc
+                self._telemetry("status", ("speech_recovery", {"stage": "synthesis", "kind": problem["kind"], "attempt": 2}))
+                if stop.wait(.25):
+                    raise Cancelled() from exc
+
+    def _save_voice_chunk(self, turn_id, chunk):
+        chunks = [c for c in self.session.turns[turn_id]["chunks"] if c.get("index") != chunk["index"]]
+        self.session.update_turn(turn_id, chunks=sorted(chunks+[chunk], key=lambda c: c["index"]))
+
+    def _voice_failed(self, turn_id, job, exc):
+        problem = exc.problem if isinstance(exc, SpeechFailure) else issue(exc, "synthesis")
+        item = job.get("item", {"index": 0, "text": self.session.turns[turn_id]["reply"]})
+        audio = exc.audio if isinstance(exc, SpeechFailure) else None
+        self._save_voice_chunk(turn_id, {"index": item["index"], "text": item["text"], "played": False,
+                                        "audio": audio or {}, "speech_error": problem, "external_evidence": False})
+        self.current["speech_failed"] = True
+        self.current["voice_stop"].set()
+        self.voice.clear()
+        self.playback_meter.clear()
+        self.session.update_turn(turn_id, speech_error=problem, speech_status="failed")
+        if not self.current["generation_done"]:
+            self.session.update_turn(turn_id, stage="generating")
+            self._status("phase", "generating")
+        self.session.store.append("speech_failure", {"turn_id": turn_id, **problem})
+        self._status("speech_problem", problem)
+
+    def _retry_voice(self, turn_id):
+        from pathlib import Path
+
+        if (self.current and self._is_current(self.current["turn_id"])) or self._voice_busy():
+            raise RuntimeError("返答・発声が終わってから、音声を再試行してください。")
+        turn = self.session.turns.get(turn_id)
+        if not turn or not turn["reply"].strip():
+            raise ValueError("読み上げる返答がありません。")
+        if not self.settings.playback:
+            raise ValueError("音声再生がOFFです。設定を確認してください。")
+        plan = turn.get("speech_plan", [])
+        if not plan:
+            splitter = Sentences(limit=220)
+            plan = [{"index": index, "text": text} for index, text in enumerate(splitter.feed(turn["reply"])+splitter.finish())]
+        stop = threading.Event()
+        self.current = {"turn_id": turn_id, "cancellation": Cancellation(), "voice_stop": stop,
+                        "generation_started": True, "generation_done": True, "sentences": len(plan),
+                        "accepted_at": time.monotonic(), "first_token": turn["metrics"].get("first_token_seconds"),
+                        "first_voice": None, "speech_failed": False}
+        self.voice.clear()
+        for item in plan:
+            audio = next((c["audio"] for c in turn["chunks"] if c.get("text") == item["text"]
+                          and c.get("audio", {}).get("path") and Path(c["audio"]["path"]).is_file()), None)
+            self.voice.append({**item, "turn_id": turn_id, "stop": stop, "cached_audio": dict(audio) if audio else None})
+        self.session.update_turn(turn_id, stage="queued", error=None, speech_error=None, speech_status="retrying",
+                                 speech_retries=turn.get("speech_retries", 0)+1)
+        self._status("speech_problem", {})
+        self._status("error", "")
+        self._status("phase", "queued")
 
     def _finish_jobs(self):
         for future, job in list(self.jobs.items()):
@@ -424,7 +525,7 @@ class Runtime:
                         self.session.store.append("llm_io", {"turn_id": turn_id, **result})
                         self.session.update_turn(turn_id, finish_reason=result["finish_reason"])
                     elif job["kind"] == "voice":
-                        self.session.add_chunk(turn_id, result)
+                        self._save_voice_chunk(turn_id, result)
             except Cancelled:
                 if job["kind"] == "memory":
                     self.memory_task = None
@@ -439,6 +540,9 @@ class Runtime:
                     if request and request["id"] == turn_id and not request["stop"].is_set():
                         self.session.motivation_operation("delivery", {"id": turn_id, "stage": "failed"})
                         self._status("request_error", str(exc))
+                        if isinstance(exc, SpeechFailure):
+                            self._status("speech_problem", exc.problem)
+                            self.session.store.append("speech_failure", {"request_id": turn_id, **exc.problem})
                     self.request_voice = None
                     self._status("request_phase", "waiting")
                     continue
@@ -450,6 +554,9 @@ class Runtime:
                     self._status("memory_phase", "waiting")
                     continue
                 active = self._is_current(turn_id)
+                if active and job["kind"] == "voice":
+                    self._voice_failed(turn_id, job, exc)
+                    continue
                 if active:
                     self._cancel_current("処理の失敗")
                     self.session.update_turn(turn_id, stage="failed", error=f"{type(exc).__name__}: {exc}")
@@ -504,21 +611,23 @@ class Runtime:
                 )
         if self.voice and not self._voice_busy():
             item = self.voice.popleft()
-            self._job("voice", "voice", self._speak, item, turn_id=item["turn_id"])
+            self._job("voice", "voice", self._speak, item, turn_id=item["turn_id"], item=item)
         active = any(
             j.get("turn_id") == turn_id and j["kind"] in {"reply", "voice"} for j in self.jobs.values()
         )
         if current["generation_done"] and not self.voice and not active:
             self.session.update_turn(
                 turn_id,
-                stage="complete",
+                stage="failed" if current.get("speech_failed") else "complete",
+                error=self.session.turns[turn_id].get("speech_error", {}).get("message") if current.get("speech_failed") else None,
+                speech_status="failed" if current.get("speech_failed") else "played" if self.settings.playback else "file_only",
                 metrics={
                     "first_token_seconds": current["first_token"],
                     "playback_requested_seconds": current["first_voice"],
                     "total_seconds": time.monotonic() - current["accepted_at"],
                 },
             )
-            self._status("phase", "waiting")
+            self._status("phase", "speech_failed" if current.get("speech_failed") else "waiting")
 
     def _schedule_request(self):
         if (
@@ -526,6 +635,7 @@ class Runtime:
             or self._voice_busy()
             or self.session.status.get("audio_input", {}).get("asr_busy")
             or any(j["kind"] == "recording" for j in self.jobs.values())
+            or self.session.status.get("speech_problem")
         ):
             return
         active = self.session.brain.active
@@ -601,7 +711,7 @@ class Runtime:
                     try:
                         self._handle(name, data)
                     except Exception as exc:
-                        if name in {"environment", "world", "motivation"}:
+                        if name in {"environment", "world", "motivation", "retry_voice"}:
                             self._status("control_error", f"{name}：{exc}")
                             continue
                         if name in {"delta", "sentence", "voice_phase"} and self.current:

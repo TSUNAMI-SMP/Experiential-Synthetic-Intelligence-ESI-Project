@@ -272,7 +272,11 @@ def runtime_observation(status=None, backend=None, turns=None):
             if k in audio
         },
         "audio_errors": dict(status.get("audio_errors", {})),
-        "generated_chunks": len(chunks),
+        "speech_problem": {key: status.get("speech_problem", {}).get(key) for key in
+                           ("stage", "kind", "gpu_memory", "message", "error_type", "http_status", "endpoint")},
+        "speech_recovery": dict(status.get("speech_recovery", {})),
+        "generated_chunks": sum(bool(c.get("audio", {}).get("path")) for c in chunks),
+        "failed_speech_chunks": sum(bool(c.get("speech_error")) for c in chunks),
         "completed_playback_chunks": sum(bool(c.get("played")) for c in chunks),
         "physical_sound_confirmed": False,
     }

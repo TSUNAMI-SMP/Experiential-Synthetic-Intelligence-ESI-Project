@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "esi"
-version = "0.4.1"
+version = "0.4.2"
 description = "ESI-04: grounded dialogue, embodied agency and learning from demonstrations"
 requires-python = ">=3.12,<3.13"
 dependencies = [

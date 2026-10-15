@@ -13,6 +13,7 @@ class AcceleratedPerception(Perception):
         self.fallback_reason = ""
         self.cuda_types = []
         self.attempts = []
+        self.cpu_for_speech = False
 
     def _state(self, verified=False):
         from esi02.cuda_libraries import loaded_paths
@@ -56,7 +57,7 @@ class AcceleratedPerception(Perception):
         raise RuntimeError(str(last) if last else "利用できるCUDA計算形式がありません。")
 
     def _create_model(self):
-        if self.device_mode == "cpu":
+        if self.device_mode == "cpu" or self.cpu_for_speech:
             return self._cpu()
         try:
             from esi02.cuda_libraries import initialize
@@ -96,6 +97,26 @@ class AcceleratedPerception(Perception):
                 # the Python owner and try the remaining precision/CPU options.
                 pass
         self.model = None
+
+    def release_gpu_for_speech(self, stop):
+        """Free automatic ASR placement after a reported synthesis allocation failure."""
+        if self.device_mode != "auto":
+            return False
+        while not self.lock.acquire(timeout=0.1):
+            if stop.is_set():
+                return False
+        try:
+            if stop.is_set() or self.actual_device != "cuda":
+                return False
+            self._release_failed_cuda()
+            self.cpu_for_speech = True
+            self.cuda_types.clear()
+            self.actual_device, self.compute_type = None, None
+            self.fallback_reason = "音声合成でGPUメモリ不足が発生したため、聞き取りをCPUへ切り替えます。"
+            self.notify(self._state())
+            return True
+        finally:
+            self.lock.release()
 
     def _transcribe(self, audio):
         while True:

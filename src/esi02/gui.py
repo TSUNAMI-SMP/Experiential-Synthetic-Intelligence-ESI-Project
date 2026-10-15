@@ -259,10 +259,16 @@ class Window(QMainWindow):
         layout.addLayout(input_row)
         self.error = QLabel()
         self.error.setWordWrap(True)
+        self.error.setTextFormat(Qt.PlainText)
         self.error.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.error.setMinimumHeight(32)
+        self.error.setMaximumHeight(120)
         self.error.setStyleSheet("color: #f9b4bf")
-        layout.addWidget(self.error)
+        layout.insertWidget(layout.indexOf(self.meter), self.error)
+        self.repeat_voice_button = QPushButton("返答をもう一度読み上げる")
+        self.repeat_voice_button.setToolTip("表示済みの返答を読み上げます。文章の生成や部屋・PCの操作は繰り返しません。")
+        self.repeat_voice_button.clicked.connect(self.repeat_voice)
+        input_row.addWidget(self.repeat_voice_button)
         diagnostic_row = QHBoxLayout()
         self.diagnostics_hint = QLabel()
         self.diagnostics_hint.setWordWrap(True)
@@ -441,6 +447,11 @@ class Window(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "録音を入力", "", "音声 (*.wav *.flac *.ogg)")
         if path:
             self.send("recording", path)
+
+    def repeat_voice(self):
+        turn = next((turn for turn in reversed(self.session.view()["turns"]) if turn["reply"].strip()), None)
+        if turn:
+            self.send("retry_voice", turn["id"])
 
     def memory_action(self, operation, data):
         if self.preparation:
@@ -811,7 +822,8 @@ class Window(QMainWindow):
         )
         self.hardware.setText(
             f"言語：{mode} / 聞き取り：{asr_mode}\n"
-            + (backend.get("reason") or backend.get("fallback_reason") or "")
+            + ("言語モデルのGPU推論を確認しました。" if mode == "GPU" and backend.get("inference_verified")
+               else backend.get("reason") or backend.get("fallback_reason") or "")
             + ("\n" + asr["fallback_reason"] if asr.get("fallback_reason") else "")
         )
         capture = getattr(self.runtime, "microphone", None)
@@ -854,8 +866,17 @@ class Window(QMainWindow):
                 "cancelled": "中断しました",
                 "failed": "処理に問題がありました",
             }.get(turn["stage"], turn["stage"])
+            if turn.get("speech_error") and turn["stage"] == "failed" and turn.get("finish_reason"):
+                stage = "文章は完了 / 音声の生成に失敗" if turn["speech_error"]["stage"] == "synthesis" else "文章は完了 / スピーカーへの再生に失敗"
+            if turn.get("speech_retries") and turn["stage"] == "complete":
+                stage = "音声の再生を完了"
             entries.append(f"［{stage}{timing}］")
-            if turn["chunks"] and not any(c.get("played") for c in turn["chunks"]):
+            if turn.get("speech_error"):
+                failure = turn["speech_error"]
+                entries.append(failure["message"]+"\n詳細："+failure["technical_error"])
+            if turn.get("error") and turn["error"] != (turn.get("speech_error") or {}).get("message"):
+                entries.append("詳細："+turn["error"])
+            if turn["chunks"] and any(c.get("audio", {}).get("path") for c in turn["chunks"]) and not any(c.get("played") for c in turn["chunks"]):
                 entries.append("音声ファイルを保存（スピーカー再生は未確認・OFF・中断）")
         content = "\n\n".join(entries)
         if content != self.conversation.toPlainText():
@@ -877,6 +898,7 @@ class Window(QMainWindow):
             status.get("error")
             or status.get("control_error")
             or self.ui_error
+            or (status.get("speech_problem", {}).get("message", "")+" "+status.get("speech_problem", {}).get("technical_error", "")).strip()
             or self.desktop.problem
             or model.problem
         )
@@ -885,10 +907,14 @@ class Window(QMainWindow):
                             if turn["stage"] == "failed" and turn.get("error")), "")
             problem = problem or "直前の処理に失敗しました。入力し直すか、停止して再開してください。診断に処理状況を保存できます。"
         if problem:
-            self.error.setText(problem)
+            self.error.setText(problem[:350]+("…（詳細は会話欄）" if len(problem)>350 else ""))
         else:
             self.error.clear()
+        self.error.setVisible(bool(problem))
         self.phase.setToolTip(problem or phase_text)
+        self.repeat_voice_button.setEnabled(running and not preparing and self.session.settings.playback
+                                           and status.get("phase") in {"waiting", "failed", "speech_failed"}
+                                           and bool(view["turns"] and view["turns"][-1]["reply"]))
         self.desktop.refresh(running, mic, symbol, phase_text, problem)
         self.desktop.microphone.start_action.setEnabled(not preparing and (self.connection_ready or running))
         self.desktop.microphone.mic_action.setEnabled(not preparing and self.connection_ready)

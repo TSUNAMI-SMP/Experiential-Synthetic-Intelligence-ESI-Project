@@ -149,3 +149,54 @@ def test_output_device_open_failure_clears_preexisting_and_new_meter_state(tmp_p
     with pytest.raises(OSError, match="device disconnected"):
         playback.play_wave(path, meter=meter)
     assert meter.level() == 0
+
+
+def test_windows_open_rejection_retries_native_stereo_before_any_audio(tmp_path, monkeypatch):
+    path = tmp_path / "audio.wav"
+    sf.write(path, np.full(1600, .15), 16000)
+    streams = install_stream(monkeypatch)
+    actual = sd.OutputStream
+    profiles = []
+
+    def open_stream(**kwargs):
+        profiles.append((kwargs["samplerate"], kwargs["channels"]))
+        assert kwargs["blocksize"] == 0 and kwargs["latency"] == "high"
+        if kwargs["samplerate"] == 16000:
+            raise sd.PortAudioError("Pa_OpenStream: Invalid sample rate")
+        return actual(**kwargs)
+
+    monkeypatch.setattr(sd, "OutputStream", open_stream)
+    monkeypatch.setattr(sd, "query_devices", lambda *args: {"default_samplerate": 48000, "max_output_channels": 2, "name": "native-output"})
+    monkeypatch.setattr(sd, "check_output_settings", lambda **kwargs: None)
+    route, meter = {}, playback.PlaybackMeter()
+    assert playback.play_wave(path, routing=route, meter=meter)
+    assert profiles == [(16000, 2), (48000, 2)]
+    assert route["playback_sample_rate"] == 48000 and route["playback_frames_submitted"] == 4800
+    assert len(route["playback_attempts"]) == 2
+    assert len(streams) == 1 and meter.level() == 0
+
+
+def test_device_error_after_submitted_audio_never_repeats_already_heard_samples(tmp_path, monkeypatch):
+    path = tmp_path / "audio.wav"
+    sf.write(path, np.full(1600, .15), 16000)
+    install_stream(monkeypatch)
+    actual = sd.OutputStream
+
+    class FailsAfterOutput:
+        def __init__(self, **kwargs):
+            self.inner = actual(**kwargs)
+
+        def __enter__(self):
+            return self.inner.__enter__()
+
+        def __exit__(self, *args):
+            self.inner.__exit__(*args)
+            raise sd.PortAudioError("Device disconnected after output")
+
+    monkeypatch.setattr(sd, "OutputStream", FailsAfterOutput)
+    monkeypatch.setattr(sd, "query_devices", lambda *args: pytest.fail("Must not retry after submitting samples"))
+    meter, route = playback.PlaybackMeter(), {}
+    with pytest.raises(sd.PortAudioError, match="disconnected"):
+        playback.play_wave(path, meter=meter, routing=route)
+    assert len(route["playback_attempts"]) == 1 and route["playback_frames_submitted"] > 0
+    assert meter.level() == 0
