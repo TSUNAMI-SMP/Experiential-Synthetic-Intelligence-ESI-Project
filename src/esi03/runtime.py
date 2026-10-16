@@ -53,6 +53,10 @@ class Runtime(PreviousRuntime):
             cancellation=cancellation,
         )
 
+    def _reply_result(self, job, result):
+        self.session.dialogue_result(job["turn_id"], result)
+        super()._reply_result(job, result)
+
     def _finish_jobs(self):
         for future, job in list(self.jobs.items()):
             if not future.done() or job["kind"] != "tool":
@@ -85,14 +89,6 @@ class Runtime(PreviousRuntime):
                 self.session.research.finish(job["request_id"], error=str(exc))
                 self._status("tools_error", str(exc))
                 self._status("tools_phase", "failed")
-        for future, job in list(self.jobs.items()):
-            if not future.done() or job["kind"] != "reply" or not self._is_current(job.get("turn_id")):
-                continue
-            try:
-                result = future.result()
-            except Exception:
-                continue  # Base owner applies the normal cancellation/error handling.
-            self.session.dialogue_result(job["turn_id"], result)
         super()._finish_jobs()
 
     def _schedule(self):

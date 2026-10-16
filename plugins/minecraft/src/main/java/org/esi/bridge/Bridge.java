@@ -50,6 +50,8 @@ public final class Bridge implements AutoCloseable {
     private final LinkedHashMap<String, Map<String, Object>> accepted = new LinkedHashMap<>();
     private Map<String, Object> result = new LinkedHashMap<>();
     private Operation operation;
+    private final Deque<Map<String,Object>> messages = new ArrayDeque<>();
+    private final Set<String> spoken = new LinkedHashSet<>();
     private final Workstation workstation = new Workstation();
     public Bridge(MinecraftServer server) { this.server = server; }
     static String randomCode() {
@@ -136,8 +138,9 @@ public final class Bridge implements AutoCloseable {
         }
         lease = randomCode(); sessionId = UUID.randomUUID().toString(); heartbeat = System.nanoTime();
         paused = false;
-        views.clear(); accepted.clear(); result.clear();
-        return Map.of("protocol", 1, "plugin_id", "minecraft.fabric", "lease", lease);
+        views.clear(); accepted.clear(); result.clear(); messages.clear(); spoken.clear();
+        return Map.of("protocol", 1, "plugin_id", "minecraft.fabric", "lease", lease,
+            "bridge_version", "0.4.6", "capabilities", List.of("chat", "daylight"));
     }
     EntityPlayerActionPack pack() { return ((ServerPlayerInterface) bot).getActionPack(); }
     public Map<String, Object> state() {
@@ -152,8 +155,31 @@ public final class Bridge implements AutoCloseable {
         value.put("targets", view.targets()); value.put("action", new LinkedHashMap<>(result));
         value.put("recipes",view.recipes()); value.put("container",view.container());
         value.put("crafting_grid",workstation.grid(bot));
+        value.put("daylight", bot.level().dimensionType().hasSkyLight()
+            ? (bot.level().isBrightOutside() ? "day" : "night") : "unknown");
+        value.put("messages", new ArrayList<>(messages));
         value.put("events", bot.isDeadOrDying() || bot.isRemoved() ? List.of("ESIが死亡または退出した。") : List.of());
         value.put("basis", "game_observation"); return value;
+    }
+    public boolean hear(ServerPlayer sender, String text) {
+        if (!isOwner(sender) || bot == null || bot.isRemoved() || lease.isEmpty()) return false;
+        text = text.strip();
+        if (text.isEmpty() || text.length()>1000) return false;
+        messages.addLast(Map.of("id",sessionId+":"+UUID.randomUUID(),"sender",sender.getUUID().toString(),
+            "text",text,"tick",server.getTickCount()));
+        while(messages.size()>16) messages.removeFirst();
+        return true;
+    }
+    public Map<String,Object> say(JsonObject input) {
+        String id=text(input,"id",100), message=text(input,"text",1000).strip();
+        if(id.isBlank() || message.isBlank()) throw new IllegalArgumentException("会話のIDと本文が必要です。");
+        var owner=server.getPlayerList().getPlayer(ownerId);
+        if(owner==null || bot==null || bot.isRemoved()) throw new IllegalStateException("ESIは接続していません。");
+        if(spoken.add(id)) {
+            owner.sendSystemMessage(Component.literal("<ESI> "+message));
+            while(spoken.size()>128) spoken.remove(spoken.iterator().next());
+        }
+        return Map.of("delivered",true,"id",id);
     }
     public Map<String, Object> act(JsonObject request) {
         if (paused) throw new IllegalStateException("Minecraft側で操作を停止しています。ESIで再接続してから開始してください。");
@@ -196,7 +222,8 @@ public final class Bridge implements AutoCloseable {
                     if (flag(request, "jump")) pack().start(ActionType.JUMP, Action.continuous());
                 }
                 case "go_to" -> {
-                    requireTarget(target); operation.path = Walking.path(bot, target.position(),target.kind().equals("block"));
+                    requireTarget(target); operation.path = Walking.path(bot, target.position(),target.kind().equals("block")
+                        || target.kind().equals("entity") && !target.name().startsWith("item:"));
                     if (operation.path.isEmpty()) {
                         if (bot.blockPosition().distManhattan(BlockPos.containing(target.position()))<=1)
                             finish("completed", "すでに対象のすぐ近くにいる", false);

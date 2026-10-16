@@ -83,6 +83,10 @@ class PendingAttempt(Model):
     held: str = ""
     recipe_id: str = ""
     step: SmallGoal = Field(default_factory=SmallGoal)
+    life_goal_id: str = ""
+    choice: str = Field(default="", max_length=200)
+    signature: str = Field(default="", max_length=400)
+    known_visited: list[str] = Field(default_factory=list, max_length=192)
 
 
 class LifeLearning(Model):
@@ -107,6 +111,10 @@ def counts(items):
     return result
 
 
+def place_key(world_id, dimension, x, y, z):
+    return f"{world_id}:{dimension}:{math.floor(x/4)},{math.floor(y/4)},{math.floor(z/4)}"
+
+
 def remember_places(learning, observation, at):
     """A cell records only targets actually returned by the visibility-limited sensor."""
     actor = observation.actor
@@ -114,7 +122,7 @@ def remember_places(learning, observation, at):
         (t.x, t.y, t.z, t) for t in observation.targets if t.kind != "waypoint"]
     by_key = {p.key: p for p in learning.places}
     for x, y, z, target in points:
-        key = f"{observation.world_id}:{actor.dimension}:{math.floor(x/4)},{math.floor(y/4)},{math.floor(z/4)}"
+        key = place_key(observation.world_id, actor.dimension, x, y, z)
         place = by_key.get(key)
         if place is None:
             place = PlaceMemory(key=key, world_id=observation.world_id, dimension=actor.dimension,
@@ -154,6 +162,8 @@ def check_result(pending, evidence, observation):
     food = after.get("food", 0)-before.get("food", 0)
     saturation = after.get("saturation", 0)-before.get("saturation", 0)
     health = after.get("health", 0)-before.get("health", 0)
+    camera_changed = (abs((after.get("yaw", 0)-before.get("yaw", 0)+180) % 360-180) > .1
+                      or abs(after.get("pitch", 0)-before.get("pitch", 0)) > .1)
     wear = {}
     for old_item in before.get("inventory", []):
         new_item = next((i for i in after.get("inventory", []) if i.get("slot") == old_item.get("slot")
@@ -163,8 +173,11 @@ def check_result(pending, evidence, observation):
             if used > 0:
                 wear[old_item["name"]] = used
     expected = pending.step
+    effect = bool(gains or losses or wear or moved > .15 or block_changed or food or saturation or health
+                  or before.get("held") != after.get("held") or before.get("container_id") != after.get("container_id")
+                  or camera_changed)
     checks = {
-        "observe": observation.id != pending.observation_id,
+        "observe": camera_changed if pending.kind == "look" else effect,
         "held": after.get("held") == (expected.item or before.get("selected_item")),
         "inventory_gain": gains.get(expected.item, 0) > 0 if expected.item else bool(gains),
         "inventory_decrease": losses.get(expected.item, 0) > 0 if expected.item else bool(losses),
@@ -184,11 +197,13 @@ def check_result(pending, evidence, observation):
         detail = f"所持品増加 {gains or 'なし'} / 減少 {losses or 'なし'} / 満腹度 {food:+} / 体力 {health:+g}"
     if wear:
         detail += f" 道具の耐久度消費 {wear}。"
-    effect = bool(gains or losses or wear or moved > .15 or block_changed or food or saturation or health
-                  or before.get("held") != after.get("held") or before.get("container_id") != after.get("container_id")
-                  or any(abs(after.get(a, 0)-before.get(a, 0)) > .1 for a in ("yaw", "pitch")))
+    if pending.kind in {"move", "go_to"}:
+        detail = f"位置が約{moved:.1f}ブロック移動。"+detail
+    elif pending.kind == "look":
+        detail = ("視線の向きが変わった。" if camera_changed else "視線の変化は確認できなかった。")+detail
     return {"gains": gains, "losses": losses, "movement": round(moved, 2), "food_delta": food,
             "health_delta": health, "durability_used": wear, "block_changed": block_changed, "effect_observed": effect,
+            "camera_changed": camera_changed,
             "goal_confirmed": bool(checks[expected.check]), "detail": detail,
             "before": before, "after": after}
 
@@ -202,6 +217,11 @@ def learning_context(state):
     trials = [t for t in learning.trials if (t.world_id, t.dimension) == (seen.world_id, seen.actor.dimension)][-4:]
     plan = learning.plan.model_dump(exclude={"source_id", "request_id", "world_id", "reason", "review", "goal"})
     plan["same_goal"] = learning.plan.goal == state.goal
+    events = [e for e in learning.episodes if e.get("world_id") == seen.world_id]
+    # A recent glance should not erase what was actually acquired or learned on
+    # a visit when answering "what did you learn?". These are past observations.
+    meaningful = [e for e in events if e.get("gains") or e.get("losses") or e.get("movement", 0) > .15
+                  or e.get("kind") != "look" and e.get("effect_observed")]
     return {"plan": plan if learning.plan.world_id == seen.world_id else {},
             "past_observed_places_not_current_sight": [
                 {"position": [round(p.x), round(p.y), round(p.z)], "names": p.names[:4], "risks": p.risks,
@@ -210,5 +230,5 @@ def learning_context(state):
             "past_opened_storage_not_current_contents": [
                 {"target_id": s.target_id, "position": [s.x, s.y, s.z], "items": dict(list(s.items.items())[:5]), "last_tick": s.tick}
                 for s in learning.storage if (s.world_id, s.dimension) == (seen.world_id, seen.actor.dimension)][-2:],
-            "recent_observed_changes": [{k: e.get(k) for k in ("kind", "goal_confirmed", "detail", "source_observation")}
-                                        for e in learning.episodes if e.get("world_id") == seen.world_id][-2:]}
+            "recent_observed_changes": [{k: e.get(k) for k in ("kind", "goal_confirmed", "movement", "novel_visit", "detail", "source_observation")}
+                                        for e in (meaningful or events)[-2:]]}

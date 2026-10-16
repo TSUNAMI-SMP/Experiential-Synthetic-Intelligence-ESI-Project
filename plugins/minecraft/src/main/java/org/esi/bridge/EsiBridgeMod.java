@@ -2,10 +2,12 @@ package org.esi.bridge;
 
 import java.util.IdentityHashMap;
 import java.util.Map;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
@@ -16,6 +18,11 @@ public final class EsiBridgeMod implements ModInitializer {
     private static final Map<MinecraftServer, Bridge> BRIDGES = new IdentityHashMap<>();
     public static Bridge get(MinecraftServer server) { return BRIDGES.computeIfAbsent(server, Bridge::new); }
     @Override public void onInitialize() {
+        ServerMessageEvents.CHAT_MESSAGE.register((message, sender, parameters) -> {
+            String text=message.signedContent();
+            if(text.startsWith("@ESI ") || text.startsWith("@esi "))
+                get(sender.level().getServer()).hear(sender,text.substring(5));
+        });
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             Bridge bridge = BRIDGES.get(server);
             if (bridge != null) bridge.tick();
@@ -41,6 +48,14 @@ public final class EsiBridgeMod implements ModInitializer {
                         return 0;
                     }
                 }))
+                .then(Commands.literal("say").then(Commands.argument("message",StringArgumentType.greedyString()).executes(context -> {
+                    Bridge bridge=get(context.getSource().getServer());
+                    if(!bridge.hear(context.getSource().getPlayerOrException(),StringArgumentType.getString(context,"message"))) {
+                        context.getSource().sendFailure(Component.literal("先にESIを接続してください。接続した本人からのみ話しかけられます。"));
+                        return 0;
+                    }
+                    return 1;
+                })))
                 .then(Commands.literal("stop").executes(context -> {
                     Bridge bridge = get(context.getSource().getServer());
                     if (!bridge.isOwner(context.getSource().getPlayerOrException())) return 0;

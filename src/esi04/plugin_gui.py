@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from esi02.desktop_preferences import write_json
+from esi04.environment_life import current_goal, life_context
 from esi04.minecraft import action_menu
 from esi04.plugins import Connection
 
@@ -57,13 +58,17 @@ class PluginPanel(QWidget):
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         self.goal = QLineEdit()
-        self.goal.setPlaceholderText("目標・気になること（攻略手順を決めず、自分で周囲を調べることもできます）")
+        self.goal.setPlaceholderText("希望・相談があれば入力（空欄でも、自分の関心や必要から生活します）")
         layout.addWidget(self.goal)
         row = QHBoxLayout()
-        self.autonomous = QCheckBox("Minecraftで自分から行動を選ぶ")
+        self.autonomous = QCheckBox("Minecraftで自律生活する")
         row.addWidget(self.autonomous)
-        self.button(row, "目標と自律活動の設定を適用", self.options)
+        self.button(row, "希望と設定を適用", self.options)
+        self.button(row, "自律生活を開始・再開", self.start_life)
         layout.addLayout(row)
+        self.life_summary = QLabel("接続後、「自律生活を開始・再開」で生活を始めます。行動指示は不要です。")
+        self.life_summary.setWordWrap(True)
+        layout.addWidget(self.life_summary)
         row = QHBoxLayout()
         self.actions = QComboBox()
         row.addWidget(self.actions, 1)
@@ -74,18 +79,22 @@ class PluginPanel(QWidget):
         layout.addWidget(self.body)
         self.details = QTextEdit()
         self.details.setReadOnly(True)
+        self.life_view = QTextEdit()
+        self.life_view.setReadOnly(True)
         self.learning_view, self.places_view = QTextEdit(), QTextEdit()
         self.learning_view.setReadOnly(True)
         self.places_view.setReadOnly(True)
-        for view in (self.details, self.learning_view, self.places_view):
+        for view in (self.details, self.life_view, self.learning_view, self.places_view):
             view.setMinimumHeight(240)
         tabs = QTabWidget()
         tabs.addTab(self.details, "現在の観察・操作")
+        tabs.addTab(self.life_view, "生活の目的・会話")
         tabs.addTab(self.learning_view, "小さな目標・経験")
         tabs.addTab(self.places_view, "見た場所の記憶")
         layout.addWidget(tabs, 1)
         help_text = QLabel("Fabric 1.21.11にFabric API・Carpet・ESI Bridge MODを導入します。\n"
                            "画面認識モデルは使いません。操作・周囲・食事の結果はMODから取得します。\n"
+                           "ESI本体の音声・文字入力、ゲーム内の /esi say 本文 または @ESI 本文で同じESIに話しかけられます。\n"
                            "接続が切れた場合やワールドから退出した場合は活動を止めます。再起動時に自律活動を自動再開しません。")
         help_text.setWordWrap(True)
         layout.addWidget(help_text)
@@ -143,6 +152,10 @@ class PluginPanel(QWidget):
     def options(self):
         self.send("options", {"autonomous": self.autonomous.isChecked(), "goal": self.goal.text()})
 
+    def start_life(self):
+        self.autonomous.setChecked(True)
+        self.options()
+
     def manual(self):
         if self.actions.currentData():
             self.send("manual", {"id": self.actions.currentData()})
@@ -165,16 +178,29 @@ class PluginPanel(QWidget):
         if self.displayed_autonomous != state.autonomous:
             self.displayed_autonomous = state.autonomous
             self.autonomous.setChecked(state.autonomous)
-        if status.get("plugin_error"):
+        if state.active_id:
+            phase = {"connecting": "接続処理中", "deciding": "目的と行動を考えています", "connected": "接続済み",
+                "disconnected": "切断", "paused": "生活を停止中", "conversation": "会話中・目的を保持",
+                "resting": "待機を選択", "waiting": "処理待ち", "observing": "観察中", "acting": "操作中・結果待ち",
+                "dead": "死亡・退出"}.get(status.get("plugin_phase"), "切断")
+            self.status.setText("生活環境：Minecraft / "+phase+" / 自律生活："+("ON" if state.autonomous else "OFF")
+                +(" / Bridge "+status["plugin_bridge_version"] if status.get("plugin_bridge_version") else "")
+                +"\n"+status.get("plugin_wait_reason", "")
+                +("\nゲーム内会話にはBridge MODも更新してください。" if status.get("plugin_connected")
+                  and status.get("plugin_chat_available") is False else "")
+                +("\n"+status["plugin_error"] if status.get("plugin_error") else ""))
+        elif status.get("plugin_error"):
             self.status.setText(status["plugin_error"])
-        elif state.active_id:
-            phase = {"connecting": "接続処理中", "deciding": "次の行動を考えています", "connected": "接続済み", "disconnected": "切断"}.get(status.get("plugin_phase"), "切断")
-            self.status.setText("生活環境：Minecraft / "+phase+" / 自律活動："+("ON" if state.autonomous else "OFF"))
+        goal = current_goal(state)
+        agenda = life_context(state)
+        self.life_summary.setText(("現在の生活の目的："+goal.purpose if goal else "次の生活の目的を自分で選びます。")
+            +("\n見直しが必要："+agenda["review_reason"] if agenda.get("review_required") else ""))
         observation = state.observation
         if not observation or not state.active_id:
             self.body.setText("Minecraftの現在の身体状態は、接続後に表示します。")
             self.details.clear()
             self.learning_view.clear()
+            self.life_view.clear()
             self.places_view.clear()
             self.actions.clear()
             return
@@ -183,6 +209,7 @@ class PluginPanel(QWidget):
                           f"{actor.dimension} / 座標 {actor.x:.1f}, {actor.y:.1f}, {actor.z:.1f}"
                           + ("（前回取得した状態・現在は未接続）" if not status.get("plugin_connected") else ""))
         self.show_learning(state, observation)
+        self.show_life(state, observation)
         if self.observation_id == observation.id:
             return
         self.observation_id = observation.id
@@ -243,7 +270,7 @@ class PluginPanel(QWidget):
                   "inventory_decrease": "所持品が減る", "food_increase": "満腹度が回復する", "block_change": "対象のブロックが変わる",
                   "approach": "対象へ近づく", "container_open": "収納・作業画面が開く", "none": "今回は確認しない"}
         title = "前のワールドで考えた小さな目標：" if plan.world_id and plan.world_id != observation.world_id else "今回の小さな目標："
-        lines = ["現在の目標："+state.goal, title+plan.step.purpose, "状態："+stages[plan.stage],
+        lines = ["利用者の希望・相談："+(state.goal or "指定なし"), title+plan.step.purpose, "状態："+stages[plan.stage],
                  "重視した欲求："+{"hunger": "食事", "safety": "安全", "curiosity": "好奇心", "growth": "成長",
                                  "social": "交流", "achievement": "達成", "autonomy": "自立"}[plan.focus],
                  "確認する変化："+checks[plan.step.check]+(" / "+plan.step.item if plan.step.item else ""),
@@ -269,3 +296,30 @@ class PluginPanel(QWidget):
                 f"{s.x:.0f}, {s.y:.0f}, {s.z:.0f} / {s.items or '空だった'} / 最終確認 tick {s.tick}\n出典: {s.source_id}"
                 for s in stores[-12:])
         self.show_text(self.places_view, text)
+
+    def show_life(self, state, observation):
+        agenda = life_context(state)
+        stages = {"active": "現在の目的", "suspended": "保留・後で再検討", "completed": "選んだ確認条件が成立", "abandoned": "取りやめ"}
+        focus_names = {"hunger": "食事", "safety": "安全", "curiosity": "好奇心", "growth": "成長",
+                       "social": "交流", "achievement": "達成", "autonomy": "自立"}
+        checks = {"observe": "周囲・対象を見る", "held": "選んだ物を手に持つ", "inventory_gain": "所持品が増える",
+                  "inventory_decrease": "所持品が減る", "food_increase": "満腹度が回復する", "block_change": "ブロックが変わる",
+                  "approach": "選んだ場所へ近づく", "container_open": "収納・作業画面が開く", "none": "まだ確認条件を決めていない"}
+        goals = [g for g in state.life.goals if (g.world_id, g.dimension) == (observation.world_id, observation.actor.dimension)]
+        lines = ["人格・欲求・体験・会話からESIが目的を選びます。意図と実際の変化は分けて記録します。",
+                 "確認条件もESIの予想です。条件の適切さと、実際に観察できた変化を見比べられます。",
+                 f"判断 {state.life.decisions}回 / 最後の選択 {state.life.last_choice or 'まだなし'}",
+                 "選んだ理由の要約（生成した説明）："+state.life.last_reason, ""]
+        if agenda.get("review_required"):
+            lines += ["見直しが必要になった状況："+agenda["review_reason"], ""]
+        for goal in reversed(goals[-12:]):
+            lines += [f"【{stages[goal.stage]}】{goal.purpose}",
+                      f"重視：{focus_names[goal.focus]} / {'会話から' if goal.origin == 'conversation' else '自分の関心から'} / 試行 {goal.attempts}回",
+                      "選んだ理由："+goal.reason, "見直し・実際の結果："+goal.review,
+                      f"確認条件：{checks[goal.check.check]}"+(f" / {goal.check.item}" if goal.check.item else "")
+                      +(f" / 必要な増減 {goal.check.amount}" if goal.check.check in {"inventory_gain", "inventory_decrease", "food_increase"} else ""),
+                      "出典："+", ".join(goal.evidence or [goal.source_id]), ""]
+        lines += ["最近の会話（教わった説明・自身の意図。観察による事実とは区別）："]
+        lines += [("あなた：" if message.speaker == "user" else "ESI：")+message.text
+                  for message in state.life.messages if message.world_id == observation.world_id][-8:]
+        self.show_text(self.life_view, "\n".join(lines))

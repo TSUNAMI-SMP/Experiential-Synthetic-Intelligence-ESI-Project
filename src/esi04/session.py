@@ -16,6 +16,7 @@ from esi04.agency import Agency
 from esi04.beliefs import Beliefs
 from esi04.computer_models import ScreenTeaching
 from esi04.config import Settings
+from esi04.environment_life import remember_message
 from esi04.experience import YES, Experience
 from esi04.motivation import Brain
 from esi04.plugin_session import EnvironmentSession
@@ -48,6 +49,10 @@ class Session(EnvironmentSession, PreviousSession):
         super().__init__(*args, **kwargs)
         self.plugins.autonomous = False
         self.plugins.learning.pending = None
+        self.plugins.life.wait_until = 0
+        self.plugins.life.wait_signature = ""
+        if self.plugins.goal == "周囲を観察して少しずつできることを増やす。空腹や危険も大切にする。":
+            self.plugins.goal = ""  # The old starter text is not a permanent user command.
         if self.plugins.learning.plan.stage == "running":
             self.plugins.learning.plan.stage = "unobserved"
             self.plugins.learning.plan.review = "再起動で中断した操作の結果は未確認。再接続後に観察し直す。"
@@ -102,6 +107,9 @@ class Session(EnvironmentSession, PreviousSession):
         if turn.get("recognition_needs_confirmation") or not turn.get("use_in_dialogue_history", True):
             return
         text = turn["input"]
+        if self.plugins.active_id:
+            remember_message(self.plugins, turn["id"], "user", text, self.world.elapsed,
+                             "minecraft" if turn.get("source") == "minecraft" else "app")
         command = scene_command(text, self.world) if not self.plugins.active_id else None
         if command:
             if command.get("error"):
@@ -198,6 +206,9 @@ class Session(EnvironmentSession, PreviousSession):
             context["environment"] = self.environment_context()
             if self.plugins.active_id:
                 context["virtual_world"] = {"enabled": False, "body": {}, "stimulus": {}, "objects": []}
+                character["allow_environment_question"] = (self.experience.state.preferences.proactive
+                    and self.experience.state.availability != "busy" and not self.experience.pending_question()
+                    and self.world.elapsed >= self.experience.state.preferences.quiet_until)
             return context
 
     @atomic
@@ -296,6 +307,9 @@ class Session(EnvironmentSession, PreviousSession):
         interest_id = result.pop("asked_interest", None)
         followup = result.pop("asked_followup", False)
         super().dialogue_result(turn_id, result)
+        future_words = " ".join(value for value in (result.get("life_intention", ""),
+                                  result.get("followup_text", "") if followup else "") if value)
+        self.plugin_dialogue(turn_id, result.get("text", ""), future_words)
         pending = self.experience.pending_question()
         if (pending and pending.stage == "pending" and turn.get("question_reply", {}).get("relation") == "other"
                 and len(grams(turn["input"]) & grams(pending.topic+pending.text)) < 2):
@@ -305,7 +319,9 @@ class Session(EnvironmentSession, PreviousSession):
         if interest_id:
             self.experience.asked(interest_id, "chat:"+turn_id)
         elif followup and result.get("followup_text"):
-            self.experience.open_question(result["followup_text"], "共有してくれた体験", "相手の体験の続きを知りたい",
+            in_environment = result.get("grounding", {}).get("policy") == "minecraft_shared_life"
+            self.experience.open_question(result["followup_text"], result["followup_text"][:60] if in_environment else "共有してくれた体験",
+                                          "現在の生活と相手の発言から選んだ疑問" if in_environment else "相手の体験の続きを知りたい",
                                           action_id="chat:"+turn_id)
             self.experience.state.questions += 1
         if result.get("interest_topic"):

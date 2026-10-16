@@ -89,9 +89,11 @@ def test_stale_or_foreign_observations_cannot_change_body(session):
 def test_body_answers_use_minecraft_and_disconnected_answers_cannot_claim_old_state(session):
     connected(session)
     llm = DialogueLLM(session.settings)
-    for text in ("活動エネルギーを数値で教えて", "体調はどう？", "居心地はどう？"):
+    for text in ("活動エネルギーを数値で教えて", "体調はどう？"):
         result = llm.stream(text, [], Cancellation(), lambda _: None, lambda _: None, session.dialogue_context(text))
         assert "8/20" in result["text"] and "%" not in result["text"]
+    result = llm.stream("居心地はどう？", [], Cancellation(), lambda _: None, lambda _: None, session.dialogue_context("居心地はどう？"))
+    assert "8/20" not in result["text"]  # A life/comfort question does not force an unsolicited gauge report.
     for text in ("水分はいくつ？", "疲れている？", "体温は？"):
         result = llm.stream(text, [], Cancellation(), lambda _: None, lambda _: None, session.dialogue_context(text))
         assert "使っていない" in result["text"]
@@ -186,6 +188,17 @@ def test_minecraft_stop_disables_autonomy(session):
     assert not session.plugins.autonomous
 
 
+def test_game_reply_needs_a_matching_positive_delivery_acknowledgement(monkeypatch):
+    client = EnvironmentClient(PluginCatalog.builtin(), Connection(token="a"*32))
+    client.chat_available = True
+    for value in ({}, {"delivered": False, "id": "turn1"}, {"delivered": True, "id": "another-turn"}):
+        monkeypatch.setattr(client, "call", lambda *args: value)
+        with pytest.raises(RuntimeError, match="受け取り"):
+            client.say("turn1", "今は周りを調べたい。")
+    monkeypatch.setattr(client, "call", lambda *args: {"delivered": True, "id": "turn1"})
+    assert client.say("turn1", "今は周りを調べたい。")["delivered"]
+
+
 def test_slow_decision_rechecks_latest_visible_target_and_actual_inventory():
     manifest, seen = PluginCatalog.builtin(), observation()
     def chooser(settings, system, data, schema, cancellation, tokens):
@@ -259,7 +272,8 @@ def test_minecraft_conversation_distinguishes_story_from_equipment_request(sessi
         runtime._new_turn("私はパンを食べているよ")
         assert not list(session.turns.values())[-1].get("plugin_request")
         runtime._new_turn("木のツルハシを手に持って")
-        assert session.plugins.goal == "木のツルハシを手に持って"
+        assert session.plugins.life.messages[-1].text == "木のツルハシを手に持って"
+        assert not session.plugins.goal  # A normal turn is considered in context, not a regex goal replacement.
         assert not session.plugins.autonomous
         runtime._new_turn("操作を止めて")
         assert list(session.turns.values())[-1].get("plugin_request") == "Minecraftでの自律活動を停止した"

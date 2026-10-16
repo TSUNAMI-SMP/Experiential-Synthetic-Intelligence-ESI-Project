@@ -70,6 +70,7 @@ final class Sense {
         actor.put("food", bot.getFoodData().getFoodLevel()); actor.put("saturation", bot.getFoodData().getSaturationLevel());
         actor.put("air", Math.max(-20, Math.min(300, bot.getAirSupply())));
         actor.put("dead", bot.isDeadOrDying() || bot.isRemoved()); actor.put("on_ground", bot.onGround());
+        actor.put("eye_height",bot.getEyeHeight());
         List<Map<String,Object>> inventory = inventory(bot);
         List<Target> candidates = new ArrayList<>();
         if (!bot.isRemoved() && !bot.isDeadOrDying()) {
@@ -95,18 +96,19 @@ final class Sense {
                 candidates.add(new Target("e:"+entity.getId(),"entity",name,entity.position(),null,entity.getId()));
                 if (candidates.size()>=52) break;
             }
-            int[] offsets = {-4,-2,0,2,4};
-            int waypoints = 0;
-            outer: for (int dx:offsets) for(int dz:offsets) {
-                if (dx==0 && dz==0) continue;
+            // Cover every direction and include a one-block exit from shallow holes.
+            // The previous lexicographic 12-point cutoff only exposed one side of the player.
+            for(int[] offset:new int[][]{{0,4},{4,4},{4,0},{4,-4},{0,-4},{-4,-4},{-4,0},{-4,4},
+                    {0,2},{2,2},{2,0},{2,-2},{0,-2},{-2,-2},{-2,0},{-2,2},
+                    {0,1},{1,0},{0,-1},{-1,0}}) {
+                int dx=offset[0],dz=offset[1];
                 for(int dy:new int[]{0,1,-1}) {
                     BlockPos pos=feet.offset(dx,dy,dz);
                     if (!Walking.standable(bot,pos) || !clear(bot,new Vec3(pos.getX()+.5,pos.getY()+1,pos.getZ()+.5))) continue;
                     candidates.add(new Target("w:"+pos.getX()+","+pos.getY()+","+pos.getZ(),"waypoint","見える足場",
                         new Vec3(pos.getX()+.5,pos.getY(),pos.getZ()+.5),pos,-1));
-                    waypoints++; break;
+                    break;
                 }
-                if(waypoints>=12) break outer;
             }
         }
         Map<String,Target> references=new LinkedHashMap<>(); List<Map<String,Object>> targets=new ArrayList<>();

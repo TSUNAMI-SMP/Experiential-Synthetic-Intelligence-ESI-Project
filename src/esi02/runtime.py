@@ -464,9 +464,14 @@ class Runtime:
         self._status("error", "")
         self._status("phase", "queued")
 
+    def _reply_result(self, job, result):
+        """Apply extension metadata at the same instant this owner consumes the reply."""
+
     def _finish_jobs(self):
         for future, job in list(self.jobs.items()):
-            if not future.done():
+            # A subclass owns environment/tool/computer jobs. If one finishes
+            # between its owner's check and this loop, leave it for the next tick.
+            if job["kind"] not in {"request_voice", "memory", "recording", "reply", "voice"} or not future.done():
                 continue
             del self.jobs[future]
             turn_id = job.get("turn_id")
@@ -524,6 +529,7 @@ class Runtime:
                         self._new_turn(event.text, event.source.value, event)
                 elif self._is_current(turn_id):
                     if job["kind"] == "reply":
+                        self._reply_result(job, result)
                         self.current["generation_done"] = True
                         self.session.store.append("llm_io", {"turn_id": turn_id, **result})
                         self.session.update_turn(turn_id, finish_reason=result["finish_reason"])

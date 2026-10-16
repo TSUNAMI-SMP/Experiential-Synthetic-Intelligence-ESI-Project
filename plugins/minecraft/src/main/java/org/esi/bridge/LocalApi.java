@@ -55,6 +55,7 @@ final class LocalApi implements AutoCloseable {
                         value=switch(path) {
                             case "/v1/state" -> bridge.state();
                             case "/v1/action" -> bridge.act(input);
+                            case "/v1/chat" -> bridge.say(input);
                             case "/v1/stop" -> {bridge.stop("ESIから停止を要求した");yield Map.of("stopped",true);}
                             case "/v1/disconnect" -> {bridge.disconnect();yield Map.of("disconnected",true);}
                             default -> throw new IllegalArgumentException("対応していない接続先です。");

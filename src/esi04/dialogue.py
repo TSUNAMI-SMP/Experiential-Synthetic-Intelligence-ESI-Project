@@ -8,6 +8,8 @@ from pydantic import Field
 from esi02.grounding import Decision, relevant, render
 from esi03.dialogue import DISCOURSE, PROMPT, Plan, alternate, compact_context, grounded_fact, unknown_topic
 from esi03.dialogue import DialogueLLM as PreviousDialogue
+from esi04.environment_dialogue import speak as environment_speak
+from esi04.environment_life import observation_facts
 from esi04.minecraft import answer as environment_answer
 
 
@@ -51,6 +53,11 @@ def compact(context):
     result.update(dialogue=context.get("dialogue", {}), intent_hint=context.get("intent_hint"),
                   body=context.get("virtual_world", {}).get("body", {}))
     result["character"]["pending_question"] = context.get("character", {}).get("pending_question")
+    environment = context.get("environment", {})
+    if environment.get("active"):
+        result["environment"] = {"connected": environment.get("connected"),
+            "life": environment.get("life", {}), "facts": observation_facts(environment),
+            "activity": environment.get("activity_reason", "")}
     return result
 
 
@@ -180,6 +187,9 @@ intent_hintがchatなら、相手の体験の話として受け止める。「�
         if dialogue.get("computer_request"):
             return emit("画面を確かめながら操作してみるね。途中で対象や結果が分からなくなったら止まるよ。" if dialogue.get("computer_available")
                         else "PC操作は今は停止しているよ。画面・PC操作タブで許可すると、画面を確かめながら試せるよ。", intent="computer")
+        if environment.get("active") and intent not in {"greeting", "identity", "calling", "calculation", "recognition_problem"}:
+            answer, extra = environment_speak(self.settings, text, history, context, cancellation)
+            return emit(answer, **extra)
         if intent == "greeting":
             return emit("おはよう。今日は何をして過ごす？" if "おはよう" in text else "おかえり。話せるときに続きを聞きたいな。" if "ただいま" in text
                         else "うん、こちらこそ。" if "ありがとう" in text else "こんばんは。今は落ち着いて話せるよ。" if "こんばんは" in text else "こんにちは。話を聞いているよ。")

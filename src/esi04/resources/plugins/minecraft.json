@@ -2,7 +2,7 @@
   "api_version": 1,
   "id": "minecraft.fabric",
   "name": "Minecraft / Fabric 1.21.11",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "description": "Minecraftにプレイヤーとして参加し、見える周囲・所持品・体力・満腹度から行動を選びます。CarpetとESI Bridge MODを使います。",
   "provider": "minecraft",
   "actions": [

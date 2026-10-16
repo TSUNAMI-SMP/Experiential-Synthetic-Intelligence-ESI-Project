@@ -1,12 +1,12 @@
 # ESI-04 の導入と確認
 
-## 0.4.5：Minecraftでの経験・小さな目標・クラフトと収納
+## 0.4.6：Minecraftを居住空間にする
 
-ESIとMinecraftを終了し、更新版ZIPの内側を今までのESIフォルダーへコピーする。`data`・`models`・Python環境・AivisSpeechは残す。0.4.4をまだ試していなくても、そのまま0.4.5を導入できる。会話AIデータの再ダウンロードは不要。
+ESIとMinecraftを終了し、更新版ZIPの内側を今までのESIフォルダーへコピーする。`data`・`models`・Python環境・AivisSpeechは残す。0.4.5以前から直接更新でき、AIデータの再ダウンロードは不要。
 
-Minecraftを使う場合は **ESI本体とESI Bridge MODの両方** を更新する。`Minecraft連携MODを準備.cmd` でJARをそろえ、Minecraft側の `mods` から旧 `esi-minecraft-bridge-0.4.4.jar` を外して、`esi-minecraft-bridge-0.4.5.jar` を入れる。Fabric API・Carpetの指定版は変更していないので、同じファイルを重複して入れない。ワールド自体はそのまま使える。
+Minecraftを使う場合は **ESI本体とESI Bridge MODの両方** を更新する。`Minecraft連携MODを準備.cmd` でJARをそろえ、Minecraft側の `mods` から旧 `esi-minecraft-bridge-*.jar` を外して、`esi-minecraft-bridge-0.4.6.jar` を入れる。Fabric API・Carpetの指定版は変更していない。同じMODの旧版と新版を同時に入れない。ワールド自体はそのまま使える。
 
-`ESI-04を起動.cmd` で上部の **ESI-04 0.4.5** を確認し、Minecraft内で `/esi link` をやり直して接続する。「プラグイン・Minecraft」の「小さな目標・経験」「見た場所の記憶」で、目的と実際の変化を確認できる。詳しい試し方は [Minecraft連携](ESI-04-Minecraft連携.md)。WindowsでのGPU・音声・Minecraftの表示は実機での確認対象。
+`ESI-04を起動.cmd` で上部の **ESI-04 0.4.6** を確認し、Minecraft内で `/esi link` をやり直して接続する。希望欄は空欄のまま **「自律生活を開始・再開」** を押す。「生活の目的・会話」で、自分が選んだ目的や保留した目的を確認する。詳しい試し方とゲーム内会話は [Minecraft連携](ESI-04-Minecraft連携.md)。WindowsでのGPU・物理音声・Minecraftクライアントの表示は実機での確認対象。
 
 ## 0.4.4：Minecraftプラグイン
 

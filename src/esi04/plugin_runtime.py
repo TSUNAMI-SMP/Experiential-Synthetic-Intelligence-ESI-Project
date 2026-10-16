@@ -5,6 +5,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from esi02.dialogue import Cancellation, Cancelled
+from esi04.environment_life import current_goal, decision_signature, situation_signature
 from esi04.minecraft import action_menu, current_action, decide
 from esi04.plugins import Connection, EnvironmentClient
 
@@ -18,6 +19,16 @@ class EnvironmentRuntime:
         self.environment_io = None
         self.environment_task = None
         self.environment_next_poll, self.environment_next_decision = 0, 0
+        self.environment_outbox = {}
+
+    def _queue_environment_chat(self, identifier, text):
+        seen = self.session.plugins.observation
+        if not seen or not self.environment_client or not getattr(self.environment_client, "chat_available", False):
+            return
+        self.environment_outbox[identifier] = {"text": text, "world": seen.world_id, "session": seen.session_id,
+                                               "retry_at": 0, "attempts": 0}
+        while len(self.environment_outbox) > 8:
+            del self.environment_outbox[next(iter(self.environment_outbox))]
 
     def _cancel_environment_decision(self):
         if self.environment_task:
@@ -31,12 +42,14 @@ class EnvironmentRuntime:
         self._cancel_environment_decision()
         self.environment_task = None
         self.environment_generation += 1
+        self.environment_outbox.clear()
         client, self.environment_client = self.environment_client, None
         self.session.plugins.autonomous = False
         self.session.plugin_interrupted("接続を解除したため、中断した操作の成否は確定せず保留した。")
         self._status("plugin_connected", False)
         self._status("plugin_session", "")
         self._status("plugin_phase", "disconnected")
+        self._status("plugin_wait_reason", "接続を解除しました。目的と経験は保持し、再接続後に周囲を確認します。")
         self.environment_io = None
         if client:
             try:
@@ -45,24 +58,35 @@ class EnvironmentRuntime:
                 pass  # MOD leases also expire; a lost connection never restores room autonomy.
         return client
 
-    def _new_turn(self, text, *args, **kwargs):
+    def _new_turn(self, text, source="text", observation=None):
         active = bool(self.session.plugins.active_id)
+        from_minecraft = source == "minecraft"
         if active:
             self._cancel_environment_decision()
-            if self.environment_client:
-                self._environment_job("environment_stop", self.environment_client.stop)
-        super()._new_turn(text, *args, **kwargs)
+        # The modality is user text. Keep the channel separately so existing learning,
+        # availability and question binding treat in-game speech like the same person's typing.
+        super()._new_turn(text, "text" if from_minecraft else source, observation)
         if not active or not self.current:
             return
         turn = self.session.turns[self.current["turn_id"]]
+        if from_minecraft:
+            self.session.update_turn(turn["id"], input_channel="minecraft")
+            for message in self.session.plugins.life.messages:
+                if message.id == turn["id"] and message.speaker == "user":
+                    message.channel = "minecraft"
         if turn.get("recognition_needs_confirmation") or not turn.get("use_in_dialogue_history", True):
             return
         if re.search(r"(?:操作|マイクラ|Minecraft|行動).*(?:止めて|停止|やめて)|^(?:もう)?(?:止まって|止めて|やめて|停止して)[。！!\s]*$", text, re.I):
             self.session.plugin_options(autonomous=False)
             self.session.update_turn(turn["id"], plugin_request="Minecraftでの自律活動を停止した")
-        elif re.search(r"(?:掘って|採掘して|食べて|歩いて|移動して|調べて|集めて|拾って|見てきて|暮らして|生活して|持ち替えて|装備して|手に持って|ジャンプして|使って|置いて|クラフトして|作って|預けて|しまって|取り出して)(?:みて|ほしい|ほしいです|ください|くれる|くれない)?(?:ね|よ)?[。？！!?\s]*$", text):
-            self.session.plugin_options(goal=text)
-            self.session.update_turn(turn["id"], plugin_request=text)
+            if self.environment_client:
+                self._environment_job("environment_stop", self.environment_client.stop)
+        observation = self.session.plugins.observation
+        if observation:
+            self.session.update_turn(turn["id"], plugin_world=observation.world_id,
+                                     plugin_session=observation.session_id)
+        # Ordinary statements, proposals and answers are already retained by Session._remember.
+        # Do not overwrite a life purpose just because an utterance ends in an imperative.
 
     def _handle(self, name, data):
         if name != "plugin":
@@ -70,6 +94,8 @@ class EnvironmentRuntime:
         operation, values = data
         try:
             if operation in {"connect", "virtual", "disconnect"}:
+                self._cancel_tools()
+                self.pending_note = None
                 self._cancel_computer()
                 self._cancel_idle()
                 if self.computer:
@@ -115,6 +141,15 @@ class EnvironmentRuntime:
         except Exception as exc:
             self._status("plugin_error", str(exc))
 
+    def _reply_result(self, job, result):
+        super()._reply_result(job, result)
+        turn = self.session.turns[job["turn_id"]]
+        seen = self.session.plugins.observation
+        if (turn.get("minecraft_message_id") and self.environment_client and seen
+                and (turn.get("plugin_world"), turn.get("plugin_session")) == (seen.world_id, seen.session_id)
+                and turn["id"] not in self.session.plugins.life.sent_messages):
+            self._queue_environment_chat(turn["id"], result["text"])
+
     def _finish_jobs(self):
         for future, job in list(self.jobs.items()):
             if not future.done() or not job["kind"].startswith("environment_"):
@@ -142,15 +177,29 @@ class EnvironmentRuntime:
                     self.environment_client = job["client"]
                     self._status("plugin_session", value.session_id)
                     self._status("plugin_connected", True)
+                    self._status("plugin_bridge_version", getattr(self.environment_client, "bridge_version", "未確認"))
+                    self._status("plugin_chat_available", getattr(self.environment_client, "chat_available", False))
                     self.session.plugin_observed(value.model_dump())
                 elif job["kind"] == "environment_observe":
                     self.session.plugin_observed(value.model_dump())
+                    if (self.environment_task and "situation" in self.environment_task
+                            and self.environment_task["situation"] != decision_signature(value)
+                            and not self.environment_task["cancellation"].event.is_set()):
+                        self._cancel_environment_decision()
+                        self.environment_next_decision = 0
+                        self.session.plugin_interrupted("考えている間に身体・所持品・作業条件が変わったため、新しい状態から考え直す。")
+                elif job["kind"] == "environment_chat":
+                    identifier = job["chat_id"]
+                    self.environment_outbox.pop(identifier, None)
+                    self.session.plugins.life.sent_messages = (self.session.plugins.life.sent_messages+[identifier])[-64:]
                 elif job["kind"] == "environment_decision":
                     if job["cancellation"].event.is_set() or not self.session.plugins.autonomous:
                         continue
                     observation = self.session.plugins.observation
-                    if not observation or (value["world_id"], value["session_id"]) != (observation.world_id, observation.session_id):
+                    if (not observation or (value["world_id"], value["session_id"]) != (observation.world_id, observation.session_id)
+                            or value["source_observation"]["actor"]["dimension"] != observation.actor.dimension):
                         continue
+                    self.session.plugin_decided(value)
                     self.session.agency.summarize("Minecraftで次の行動を選ぶ", value["choice"], value["reason"],
                                                   [value["observation_id"]], certainty="planned")
                     if value["action"]:
@@ -162,19 +211,29 @@ class EnvironmentRuntime:
                             self._status("plugin_phase", "状況が変わったため観察し直しています")
                             self.session.plugin_interrupted("推論中に対象・所持品・作業条件が変わったため、実行せず考え直す。")
                     elif value["choice"] == "ask":
-                        self.session.plugin_question(value["question"], value["reason"])
+                        text = self.session.plugin_question(value["question"], value["reason"])
+                        if text:
+                            self._queue_environment_chat("question:"+str(self.session.plugins.life.decisions), text)
                     self.session._write()
                     self.environment_next_decision = time.monotonic()+2
-                self._status("plugin_phase", "connected")
-                self._status("plugin_error", "")
+                if job["kind"] != "environment_observe" or self.session.status.get("plugin_error_kind") == "environment_observe":
+                    self._status("plugin_error", "")
+                    self._status("plugin_error_kind", "")
             except Cancelled:
                 pass
             except Exception as exc:
+                if job["kind"] == "environment_decision" and job["cancellation"].event.is_set():
+                    continue  # Closing an in-flight HTTP socket can report OSError instead of Cancelled.
+                if job["kind"] == "environment_chat" and job.get("chat_id") in self.environment_outbox:
+                    outgoing = self.environment_outbox[job["chat_id"]]
+                    outgoing["attempts"] += 1
+                    outgoing["retry_at"] = time.monotonic()+min(30, 3*outgoing["attempts"])
                 if job["kind"] == "environment_action":
                     # An HTTP error can still have a source-linked failed result on the MOD.
                     # Keep its ID until the next observation, so a real failure can be learned.
                     self.session.plugin_interrupted("操作の通信が完了せず、成否は未確認。現在の状態を観察し直す。", retain_pending=True)
                 self._status("plugin_error", str(exc))
+                self._status("plugin_error_kind", job["kind"])
                 self.environment_next_decision = time.monotonic()+5
                 if job["kind"] in {"environment_connect", "environment_observe"}:
                     self._disconnect_environment()
@@ -184,27 +243,72 @@ class EnvironmentRuntime:
         now = time.monotonic()
         if not self.environment_client:
             return
+        seen = self.session.plugins.observation
+        if not self.environment_io and seen:
+            for identifier, outgoing in list(self.environment_outbox.items()):
+                if (outgoing["world"], outgoing["session"]) != (seen.world_id, seen.session_id):
+                    del self.environment_outbox[identifier]
+                elif now >= outgoing["retry_at"]:
+                    self._environment_job("environment_chat", self.environment_client.say, identifier,
+                                          outgoing["text"], chat_id=identifier)
+                    break
         if not self.environment_io and now >= self.environment_next_poll:
             self._environment_job("environment_observe", self.environment_client.observe)
             self.environment_next_poll = now+0.8
         state = self.session.plugins
         busy = bool(self.current and self._is_current(self.current["turn_id"]))
         observation = state.observation
-        if (not state.autonomous or not observation or observation.actor.dead or busy or self.environment_task
-                or self.environment_io not in {None, "environment_observe"} or now < self.environment_next_decision
-                or observation.action.get("stage") == "running" or self._voice_busy()
-                or self.session.status.get("audio_input", {}).get("asr_busy")
-                or self.session.experience.pending_question()
-                or any(job["kind"] in {"reply", "memory", "deliberation"} for job in self.jobs.values())):
+        # Route addressed in-game messages through exactly the same dialogue/voice/memory owner.
+        if observation and not busy and not self._voice_busy():
+            for message in observation.messages:
+                identifier = message.id
+                if identifier in state.life.seen_messages:
+                    continue
+                state.life.seen_messages = (state.life.seen_messages+[identifier])[-64:]
+                self._new_turn(message.text, "minecraft")
+                self.session.update_turn(self.current["turn_id"], minecraft_message_id=identifier)
+                busy = True
+                break
+        reason, phase = "", "connected"
+        if not state.autonomous:
+            phase, reason = "paused", "自律生活はOFFです。目的と経験は保存されています。"
+        elif not observation:
+            phase, reason = "observing", "現在の身体と周囲を取得しています。"
+        elif observation.actor.dead:
+            phase, reason = "dead", "Minecraftで死亡・退出しているため、再接続が必要です。"
+        elif observation.action.get("paused"):
+            phase, reason = "paused", "Minecraft側で停止されています。再接続後に再開してください。"
+        elif busy or self._voice_busy() or self.session.status.get("audio_input", {}).get("asr_busy"):
+            phase, reason = "conversation", "会話しています。生活の目的を保持して、返答後に再判断します。"
+        elif observation.action.get("stage") == "running":
+            phase, reason = "acting", "Minecraftで選んだ操作の結果を待っています。"
+        elif self.environment_task:
+            phase, reason = "deciding", "周囲・欲求・体験・会話から、目的と次の行動を考えています。"
+        elif now < self.environment_next_decision:
+            phase, reason = "waiting", "次の判断を待っています。" if not self.session.status.get("plugin_error") else "処理を再試行するまで待っています。"
+        elif (state.life.wait_until > self.session.world.elapsed
+              and state.life.wait_signature == situation_signature(observation)):
+            phase, reason = "resting", state.life.last_reason or "今は様子を見ることを選びました。"
+        elif self.environment_io not in {None, "environment_observe"}:
+            phase, reason = "acting", "Minecraftへの要求を処理しています。"
+        elif any(job["kind"] in {"reply", "memory", "deliberation"} for job in self.jobs.values()):
+            phase, reason = "waiting", "会話・記憶の処理が終わったら生活の判断を再開します。"
+        self._status("plugin_phase", phase)
+        self._status("plugin_wait_reason", reason)
+        if reason:
             return
         self._cancel_memory()
         cancellation = Cancellation()
-        self.environment_task = {"cancellation": cancellation}
+        self.environment_task = {"cancellation": cancellation, "situation": decision_signature(observation)}
         self._status("plugin_phase", "deciding")
         taught = [{k: entry.get(k) for k in ("label", "value", "source_turn_id", "confidence")}
-                  for entry in self.session.knowledge.context(state.goal, limit=4, char_limit=700)]
+                  for entry in self.session.knowledge.context((current_goal(state).purpose if current_goal(state) else state.goal)+" "+" ".join(m.text for m in state.life.messages[-2:]), limit=4, char_limit=700)]
         self._job("llm", "environment_decision", decide, self.settings, self.session.active_manifest(),
-            state.model_copy(deep=True), {**self.session.experience.context(), "availability": self.session.experience.state.availability},
+            state.model_copy(deep=True), {**self.session.experience.context(), "availability": self.session.experience.state.availability,
+                "allow_question": bool(self.session.experience.state.preferences.proactive
+                    and self.session.experience.state.availability != "busy" and not self.session.experience.pending_question()
+                    and not self.session.brain.active
+                    and self.session.world.elapsed >= self.session.experience.state.preferences.quiet_until)},
             self.session.plugin_recent(), cancellation, taught,
             environment_generation=self.environment_generation, cancellation=cancellation)
 

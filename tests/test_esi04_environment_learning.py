@@ -25,9 +25,10 @@ def frame(seen, **changes):
             "target_block": "minecraft:stone", "container_id": 0, **changes}
 
 
-def perform(session, kind="mine", check="inventory_gain", item="minecraft:cobblestone", **changes):
+def perform(session, kind="mine", check="inventory_gain", item="minecraft:cobblestone", action_id=None, **changes):
     seen = session.plugins.observation
-    action = next(a for a in action_menu(session.active_manifest(), seen).values() if a and a.kind == kind)
+    menu = action_menu(session.active_manifest(), seen)
+    action = menu[action_id] if action_id else next(a for a in menu.values() if a and a.kind == kind)
     session.plugin_attempt(action.model_dump(), {"small_goal": {"purpose": "確かめる", "check": check, "item": item},
                                                "reason": "今の所持品と周囲から試す"})
     before = frame(seen)
@@ -36,6 +37,7 @@ def perform(session, kind="mine", check="inventory_gain", item="minecraft:cobble
               "detail": "実行完了", "before_observation": seen.id, "evidence": {"before": before, "after": after}}
     value = seen.model_dump()
     value.update(id=seen.id+":after", tick=after["tick"], inventory=after["inventory"], action=result)
+    value["actor"].update({key: after_value for key, after_value in after.items() if key in value["actor"]})
     session.plugin_observed(value)
     return result
 
@@ -87,6 +89,18 @@ def test_missing_evidence_and_generated_claims_cannot_train_personality(tmp_path
                                        {"id": "invented", "status": "verified", "effect_observed": True})
 
 
+def test_a_new_poll_id_cannot_confirm_a_blocked_motor_without_a_real_change(tmp_path):
+    with closing(Session(tmp_path / "life.db", Settings(playback=False))) as session:
+        connected(session)
+        perform(session, kind="move", check="observe", item="")
+        blocked = session.plugins.learning.episodes[-1]
+        assert not blocked["effect_observed"] and not blocked["goal_confirmed"]
+        assert session.plugins.learning.plan.stage == "unobserved"
+        perform(session, kind="move", check="approach", item="", x=session.plugins.observation.actor.x+1)
+        walked = session.plugins.learning.episodes[-1]
+        assert walked["effect_observed"] and walked["goal_confirmed"]
+
+
 def test_map_is_world_scoped_and_only_remembers_visible_places(tmp_path):
     with closing(Session(tmp_path / "life.db")) as session:
         connected(session)
@@ -127,7 +141,7 @@ def test_replan_after_stale_hands_and_storage_cannot_reach_unopened_items():
     assert current_action(result, EnvironmentObservation.model_validate(changed), manifest) is None
 
 
-def test_repeated_no_effect_pauses_but_looking_does_not_count_as_failure(tmp_path):
+def test_repeated_no_effect_requests_reconsideration_without_disabling_life(tmp_path):
     with closing(Session(tmp_path / "life.db")) as session:
         connected(session)
         session.plugin_options(autonomous=True)
@@ -136,8 +150,8 @@ def test_repeated_no_effect_pauses_but_looking_does_not_count_as_failure(tmp_pat
         assert session.plugins.autonomous and session.plugins.learning.consecutive_no_effect == 0
         for _ in range(3):
             perform(session)
-        assert not session.plugins.autonomous
-        assert "いったん停止" in session.plugins.learning.plan.review
+        assert session.plugins.autonomous and session.plugins.life.review_required
+        assert "考え直す" in session.plugins.learning.plan.review
 
 
 def test_hand_answer_is_not_inventory_answer():
@@ -235,7 +249,7 @@ def test_repeated_floor_blocks_do_not_hide_a_different_visible_object():
     captured = {}
     def chooser(settings, system, value, schema, cancellation, tokens):
         captured.update(value)
-        return schema(holding="empty hand", action="look_ahead", reason="周りを確かめる")
+        return schema(holding="empty hand", action="look_left", reason="周りを確かめる")
     decide(Settings(), PluginCatalog.builtin(), PluginState(observation=EnvironmentObservation.model_validate(seen)),
            {}, [], Cancellation(), chooser=chooser)
     assert {t["name"] for t in captured["targets"]} == {"minecraft:stone", "minecraft:crafting_table"}

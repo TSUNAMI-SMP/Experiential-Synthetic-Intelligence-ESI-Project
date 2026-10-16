@@ -20,7 +20,7 @@ foreach ($entry in $manifest.files) {
     }
     Write-Host ('Verified: ' + $entry.filename)
 }
-$bridge = Join-Path $PSScriptRoot 'release\esi-minecraft-bridge-0.4.5.jar'
+$bridge = Join-Path $PSScriptRoot 'release\esi-minecraft-bridge-0.4.6.jar'
 if (-not (Test-Path -LiteralPath $bridge)) { throw 'ESI Bridge JAR is missing. Download the complete ESI-04 ZIP.' }
 $bridgeName = [IO.Path]::GetFileName($bridge)
 $checksumLine = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'release\SHA256SUMS.txt') -Encoding UTF8 |

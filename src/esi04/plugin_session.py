@@ -4,17 +4,29 @@ import hashlib
 import json
 import re
 
+from esi.models import uid
 from esi02.motivation import Brain as BodyBrain
 from esi03.storage import atomic
 from esi04.environment_learning import (
     LifePlan,
     PendingAttempt,
+    PlaceMemory,
     SmallGoal,
     TrialMemory,
     check_result,
     held_item,
     learning_context,
+    place_key,
     remember_places,
+)
+from esi04.environment_life import (
+    action_signature,
+    adopt_goal,
+    current_goal,
+    life_context,
+    observe_goal_result,
+    remember_message,
+    request_review,
 )
 from esi04.minecraft import embodied_world
 from esi04.plugins import EnvironmentAction, EnvironmentObservation, PluginCatalog
@@ -66,9 +78,22 @@ class EnvironmentSession:
                     world_id=self.plugins.observation.world_id if self.plugins.observation else "",
                     revisions=old.revisions, review="目標が変わったため、新しい小目標を考える。過去の操作は経験として残す。")
                 self.plugins.learning.consecutive_no_effect = 0
+                if text:
+                    remember_message(self.plugins, "wish:"+uid(), "user", text, self.world.elapsed, "goal_field")
             self.plugins.goal = text
+        self.plugins.life.wait_until = 0
         if autonomous is False:
             self.plugins.learning.plan.stage = "paused"
+        self._write()
+
+    @atomic
+    def plugin_decided(self, decision):
+        adopt_goal(self.plugins, decision, self.world.elapsed)
+        goal = current_goal(self.plugins)
+        self.cognition.intention = "rest" if decision["choice"] == "wait" else "ask" if decision["choice"] == "ask" else "think"
+        self.cognition.attention = goal.purpose if goal else decision["reason"][:160]
+        self.agency.summarize("Minecraftで生活の目的を選ぶ", goal.purpose if goal else "今は待つ",
+            decision["reason"], [decision["observation_id"]], certainty="planned")
         self._write()
 
     @atomic
@@ -90,7 +115,11 @@ class EnvironmentSession:
         self.plugins.learning.pending = PendingAttempt(request_id=action.request_id, world_id=observation.world_id,
             session_id=observation.session_id, dimension=observation.actor.dimension, observation_id=observation.id,
             kind=action.kind, target_id=action.target_id, target_name=target_name,
-            held=held_item(observation), recipe_id=action.recipe_id, step=step)
+            held=held_item(observation), recipe_id=action.recipe_id, step=step,
+            life_goal_id=self.plugins.life.active_goal, choice=decision.get("choice", action.kind),
+            signature=action_signature(action.model_dump(), observation),
+            known_visited=[p.key for p in self.plugins.learning.places if p.visited and
+                           (p.world_id, p.dimension) == (observation.world_id, observation.actor.dimension)])
         old = self.plugins.learning.plan
         self.plugins.learning.plan = LifePlan(world_id=observation.world_id, goal=self.plugins.goal, step=step, stage="running",
             focus=decision.get("focus", "curiosity"),
@@ -109,6 +138,7 @@ class EnvironmentSession:
             self.plugins.learning.pending = None
         self.plugins.learning.plan.stage = "unobserved"
         self.plugins.learning.plan.review = str(reason)[:400]
+        request_review(self.plugins, reason)
         self._write()
 
     def _learn_plugin_result(self, observation, identifier):
@@ -127,6 +157,21 @@ class EnvironmentSession:
             if same_plan:
                 learning.plan.stage, learning.plan.review = "unobserved", "操作前後の証拠が足りず、目標達成を確認できない。"
             return
+        after = verified["after"]
+        moving = pending.kind in {"move", "go_to"} and verified["movement"] > .15 and all(axis in after for axis in "xyz")
+        cell = place_key(observation.world_id, pending.dimension, *(after[axis] for axis in "xyz")) if moving else ""
+        novel_visit = bool(moving and cell not in pending.known_visited)
+        if novel_visit:
+            place = next((p for p in learning.places if p.key == cell), None)
+            if place:
+                place.visited = True
+            else:
+                learning.places = (learning.places+[PlaceMemory(key=cell, world_id=observation.world_id,
+                    dimension=pending.dimension, **{axis: after[axis] for axis in "xyz"}, visited=True,
+                    observation_id=identifier, tick=after["tick"], at=self.world.elapsed)])[-192:]
+            verified["detail"] = "初めてこの範囲を訪れ、場所を記憶した。"+verified["detail"]
+            self.experience.state.last_novelty = self.world.elapsed
+        verified["novel_visit"] = novel_visit
         confirmed = verified["goal_confirmed"] and result.get("stage") == "completed"
         if same_plan:
             learning.plan.stage = "confirmed" if confirmed else "failed" if result.get("stage") == "failed" else "unobserved"
@@ -136,6 +181,7 @@ class EnvironmentSession:
                    "source_observation": observation.id, "goal_confirmed": confirmed,
                    "effect_observed": verified["effect_observed"], "detail": verified["detail"][:400],
                    "gains": verified["gains"], "losses": verified["losses"],
+                   "movement": verified["movement"], "novel_visit": novel_visit,
                    "interpretation": "前後の変化は観察。原因の一般化や次の手順はまだ推測。"}
         learning.episodes = (learning.episodes+[episode])[-64:]
         key = "|".join((observation.world_id, pending.dimension, pending.kind, pending.target_name, pending.held, pending.recipe_id))
@@ -148,10 +194,14 @@ class EnvironmentSession:
         trial.effects += int(verified["effect_observed"])
         trial.goal_checks += int(confirmed)
         trial.last_source, trial.last_detail = identifier, verified["detail"][:400]
+        learning.trials = ([t for t in learning.trials if t.key != key]+[trial])[-96:]
         learning.consecutive_no_effect = 0 if verified["effect_observed"] else learning.consecutive_no_effect+1
-        # Actual eating, acquisition, movement and injury affect preferences. Looking or an LLM success claim cannot.
-        reward = -.2 if verified["health_delta"] < 0 else .12 if verified["gains"] or verified["food_delta"] > 0 else 0
-        activity = "research" if pending.kind in {"mine", "craft", "use", "withdraw"} else "explore"
+        observe_goal_result(self.plugins, pending, verified, identifier, self.world.elapsed)
+        # Novel visited ground is verified learning too; circling known ground and looking cannot reward themselves.
+        reward = (-.2 if verified["health_delta"] < 0 else .12 if verified["gains"] or verified["food_delta"] > 0
+                  else .04 if novel_visit else 0)
+        learned_acquisition = bool(verified["gains"] and trial.trials == 1)
+        activity = "research" if learned_acquisition or novel_visit or pending.kind in {"mine", "craft", "use", "withdraw"} else "explore"
         if reward:
             self.experience.outcome(identifier, activity, reward, "game_observation", identifier,
                                     {"id": identifier, "status": "verified", **verified})
@@ -161,8 +211,7 @@ class EnvironmentSession:
         self.agency.summarize("Minecraftの目標を見直す", pending.step.purpose, "操作前後の変化から、確認済みと未確認を区別した",
                               [pending.observation_id, observation.id, identifier], outcome=verified["detail"], certainty="observed")
         if learning.consecutive_no_effect >= 3:
-            self.plugins.autonomous = False
-            learning.plan.review += " 変化のない試行が続いたため、いったん停止して目標や操作を見直す。"
+            learning.plan.review += " 変化のない試行が続いたため、目的や操作を考え直す。自律活動は継続する。"
 
     def advance_plugin_clock(self, seconds, conversing):
         # The shared clock keeps social/learning state consistent; virtual physiology stays frozen.
@@ -179,12 +228,29 @@ class EnvironmentSession:
         self._write()
 
     @atomic
+    def plugin_dialogue(self, turn_id, reply, intention=""):
+        turn = self.turns[turn_id]
+        if not self.plugins.active_id or turn.get("life_reply_recorded"):
+            return
+        remember_message(self.plugins, turn_id, "esi", reply, self.world.elapsed,
+                         "minecraft" if turn.get("input_channel") == "minecraft" else "app", intention)
+        turn["life_reply_recorded"] = True
+        self._persist(turn)
+        self._write()
+
+    @atomic
     def plugin_observed(self, value):
         observation = EnvironmentObservation.model_validate(value)
         if observation.plugin_id != self.plugins.active_id:
             raise ValueError("現在の生活環境とは違う観察です。")
         if observation.session_id != self.status.get("plugin_session"):
             raise ValueError("前の接続から届いた観察は使えません。")
+        previous = self.plugins.observation
+        if previous and (previous.world_id, previous.actor.dimension) != (observation.world_id, observation.actor.dimension):
+            goal = current_goal(self.plugins)
+            if goal:
+                goal.stage, goal.review = "suspended", "生活する場所が変わったため保留。戻ったら観察して再検討する。"
+            self.plugins.life.active_goal = ""
         self.plugins.observation = observation
         remember_places(self.plugins.learning, observation, self.world.elapsed)
         if observation.action.get("paused"):
@@ -249,8 +315,10 @@ class EnvironmentSession:
         self.world.body.activity = old_activity
         action.text = text[:160]
         self.experience.open_question(action.text, action.text[:60], reason, action_id=action.id)
+        remember_message(self.plugins, action.id, "esi", action.text, self.world.elapsed, "question")
         self.agency.summarize("Minecraftについて尋ねる", action.text, reason, [self.plugins.observation.id], certainty="planned")
         self._write()
+        return action.text
 
     def world_operation(self, *args, **kwargs):
         if self.plugins.active_id:
@@ -265,4 +333,7 @@ class EnvironmentSession:
                 "disabled_concepts": manifest.disabled_concepts if manifest else [],
                 "observation": self.plugins.observation.model_dump() if self.plugins.observation else None,
                 "last_result": self.plugins.last_result,
+                "life": life_context(self.plugins),
+                "activity_status": self.status.get("plugin_phase", "disconnected"),
+                "activity_reason": self.status.get("plugin_wait_reason", ""),
                 "learning": learning_context(self.plugins)}

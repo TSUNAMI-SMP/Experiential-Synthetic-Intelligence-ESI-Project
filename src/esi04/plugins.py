@@ -13,6 +13,7 @@ from esi.models import uid
 from esi02.desktop_preferences import write_json
 from esi02.world import Model
 from esi04.environment_learning import LifeLearning
+from esi04.environment_life import LifeState
 
 
 class PluginManifest(Model):
@@ -93,6 +94,7 @@ class Actor(Model):
     air: int = Field(ge=-20, le=300)
     dead: bool = False
     on_ground: bool = True
+    eye_height: float = Field(default=1.62, ge=0, le=4)
 
 
 class Item(Model):
@@ -143,6 +145,13 @@ class OpenContainer(Model):
     items: list[ContainerItem] = Field(default_factory=list, max_length=90)
 
 
+class WorldMessage(Model):
+    id: str = Field(min_length=1, max_length=100)
+    sender: str = Field(max_length=80)
+    text: str = Field(min_length=1, max_length=1000)
+    tick: int = Field(ge=0)
+
+
 class EnvironmentObservation(Model):
     protocol: Literal[1] = 1
     id: str = Field(min_length=1, max_length=80)
@@ -159,6 +168,8 @@ class EnvironmentObservation(Model):
     action: dict = Field(default_factory=dict)
     events: list[str] = Field(default_factory=list, max_length=16)
     basis: Literal["game_observation"] = "game_observation"
+    daylight: Literal["day", "night", "unknown"] = "unknown"
+    messages: list[WorldMessage] = Field(default_factory=list, max_length=16)
 
 
 class EnvironmentAction(Model):
@@ -184,7 +195,7 @@ class EnvironmentAction(Model):
 class PluginState(Model):
     active_id: str = ""
     autonomous: bool = False
-    goal: str = Field(default="周囲を観察して少しずつできることを増やす。空腹や危険も大切にする。", max_length=1000)
+    goal: str = Field(default="", max_length=1000)
     observation: EnvironmentObservation | None = None
     last_result: dict = Field(default_factory=dict)
     discoveries: dict[str, int] = Field(default_factory=dict, max_length=256)
@@ -192,6 +203,7 @@ class PluginState(Model):
     confirmed_changes: int = Field(default=0, ge=0)
     asked_contexts: dict[str, str] = Field(default_factory=dict, max_length=32)
     learning: LifeLearning = Field(default_factory=LifeLearning)
+    life: LifeState = Field(default_factory=LifeState)
 
 
 class EnvironmentClient:
@@ -200,6 +212,8 @@ class EnvironmentClient:
     def __init__(self, manifest, connection, client_factory=httpx.Client):
         self.manifest, self.connection, self.client_factory = manifest, connection, client_factory
         self.lease = ""
+        self.chat_available = False
+        self.bridge_version = "未確認"
 
     def call(self, path, payload=None):
         headers = {"Authorization": "Bearer "+self.connection.token}
@@ -226,6 +240,8 @@ class EnvironmentClient:
         if data.get("protocol") != 1 or data.get("plugin_id") != self.manifest.id:
             raise ValueError("プラグインの接続方式が一致しません。")
         self.lease = data["lease"]
+        self.chat_available = "chat" in data.get("capabilities", [])
+        self.bridge_version = str(data.get("bridge_version", "旧版・未確認"))[:40]
         try:
             return self.observe()
         except Exception:
@@ -250,6 +266,14 @@ class EnvironmentClient:
     def stop(self):
         if self.lease:
             return self.call("/v1/stop", {})
+
+    def say(self, identifier, text):
+        if not self.chat_available:
+            raise RuntimeError("ゲーム内会話には新しいESI Bridge MODが必要です。MODも更新してください。")
+        value = self.call("/v1/chat", {"id": identifier[:100], "text": text[:1000]})
+        if value.get("delivered") is not True or value.get("id") != identifier[:100]:
+            raise RuntimeError("ゲーム内の返答の受け取りを確認できませんでした。再送を待っています。")
+        return value
 
     def disconnect(self):
         try:
