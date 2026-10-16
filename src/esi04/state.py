@@ -21,6 +21,8 @@ class Preferences(PreviousPreferences):
     autonomous_motion: bool = True
     cursor_tracking: bool = False
     thought_bubbles: bool = True
+    # Independent from whether ESI may initiate a conversation.
+    processing_voice: bool = True
 
 
 class Question(Model):
@@ -74,6 +76,19 @@ class Summary(Model):
     certainty: Literal["observed", "inferred", "planned"] = "planned"
 
 
+class Utterance(Model):
+    """Ordinary assistant speech, with no acceptance, refusal or answer deadline."""
+
+    id: str
+    at: float = Field(ge=0)
+    after_epoch: int = Field(ge=0)
+    text: str = Field(min_length=1, max_length=400)
+    source_key: str = Field(max_length=100)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=16)
+    stage: Literal["displayed", "speaking", "played", "file_only", "interrupted", "failed"] = "displayed"
+    audio: dict = Field(default_factory=dict)
+
+
 class Cognition(Model):
     summaries: list[Summary] = Field(default_factory=list, max_length=128)
     processed: list[str] = Field(default_factory=list, max_length=512)
@@ -93,3 +108,5 @@ class Cognition(Model):
     last_screen: ScreenObservation | None = None
     screen_teachings: list[ScreenTeaching] = Field(default_factory=list, max_length=64)
     computer_result: str = Field(default="", max_length=1000)
+    speech_revision: int = Field(default=0, ge=0, le=1)
+    utterances: list[Utterance] = Field(default_factory=list, max_length=64)

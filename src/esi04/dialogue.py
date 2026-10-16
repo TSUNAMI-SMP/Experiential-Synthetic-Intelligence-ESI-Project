@@ -5,6 +5,7 @@ import re
 from esi04.conversation import POLICY, Conversation
 from esi04.legacy_dialogue import DialogueLLM as ReceiptDialogue
 from esi04.legacy_dialogue import compact, intent_of  # noqa: F401 (dormant plugin compatibility)
+from esi04.speaking import simple_reply
 
 
 def polite(text):
@@ -62,13 +63,22 @@ def polite_endings(text):
 class DialogueLLM(ReceiptDialogue):
     def stream(self, text, history, cancellation, on_delta, on_sentence, context=None):
         context = {**(context or {}), "user_text": text}
+        progress = context.pop("_progress", lambda kind: None)
         dialogue = context.get("dialogue", {})
         # Command receipts describe actual application results, never a model's claimed success.
         receipt = (any(dialogue.get(k) for k in ("scene_result", "screen", "screen_error", "computer_request",
                    "computer_stopped", "plugin_request")) or context.get("environment", {}).get("active"))
         # Only unambiguous greetings and application receipts bypass model inference.
         # The legacy natural_dialogue=False setting no longer imposes a knowledge limit.
-        if receipt or intent_of(text, context) in {"greeting", "calling"}:
+        immediate = simple_reply(text, history, context.get("character", {}).get("style", "precise"))
+        if immediate and not receipt:
+            return self._emit_answer(immediate, cancellation, on_delta, on_sentence,
+                inference_performed=False, request={"knowledge_policy": POLICY},
+                intent="brief_conversation", response_effort="brief",
+                affect_appraisal={"emotion": "pleased" if "ありがとう" in text else "neutral",
+                                  "reason": "短い挨拶や応答を受け取った", "recovering": "ありがとう" in text},
+                grounding={"policy": POLICY, "refs": [], "model_output_is_evidence": False})
+        if receipt or intent_of(text, context) == "calling":
             style = context.get("character", {}).get("style", "precise")
             def delta(chunk):
                 on_delta(polite(chunk) if style != "casual" else chunk)
@@ -80,7 +90,7 @@ class DialogueLLM(ReceiptDialogue):
             result["request"]["knowledge_policy"] = POLICY
             return result
         engine = Conversation(self.settings, self.client_factory)
-        reply, request = engine.generate(text, history, cancellation, context)
+        reply, request = engine.generate(text, history, cancellation, {**context, "_progress": progress})
         candidate = dialogue.get("question_candidate")
         binding = None
         if candidate and reply.reply_relation != "none":
@@ -100,5 +110,6 @@ class DialogueLLM(ReceiptDialogue):
         return self._emit_answer(answer, cancellation, on_delta, on_sentence,
             inference_performed=True, request={**request, "knowledge_policy": POLICY},
             intent="conversation", grounding={"policy": POLICY, "refs": [], "model_output_is_evidence": False},
+            response_effort=reply.response_effort,
             question_binding=binding, asked_followup=bool(followup), followup_text=followup,
             affect_appraisal={"emotion": reply.emotion, "reason": reply.emotion_reason, "recovering": reply.recovering})

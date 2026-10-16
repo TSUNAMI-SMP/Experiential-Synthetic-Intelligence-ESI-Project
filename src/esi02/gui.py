@@ -759,6 +759,12 @@ class Window(QMainWindow):
             self.ui_error = f"セーブを開けません：{exc}"
             self.error.setText(self.ui_error)
 
+    def transcript_before(self, entries, view, epoch):
+        """Extension point for assistant-only utterances in later releases."""
+
+    def transcript_processing(self, entries, turn):
+        """Extension point for public work announcements."""
+
     def refresh(self):
         self.poll_diagnostics()
         self.poll_preparation()
@@ -847,8 +853,10 @@ class Window(QMainWindow):
             + (" / 会話から記憶を整理中" if status.get("memory_phase") == "organizing" else "")
         )
         entries = []
+        self.transcript_before(entries, view, 0)
         for turn in view["turns"]:
             entries.append("あなた：" + (turn["input"] or "（聞き取りに失敗）"))
+            self.transcript_processing(entries, turn)
             if turn["reply"]:
                 entries.append(self.release_name + "：" + turn["reply"])
             metrics = turn["metrics"]
@@ -878,6 +886,7 @@ class Window(QMainWindow):
                 entries.append("詳細："+turn["error"])
             if turn["chunks"] and any(c.get("audio", {}).get("path") for c in turn["chunks"]) and not any(c.get("played") for c in turn["chunks"]):
                 entries.append("音声ファイルを保存（スピーカー再生は未確認・OFF・中断）")
+            self.transcript_before(entries, view, turn["epoch"])
         content = "\n\n".join(entries)
         if content != self.conversation.toPlainText():
             self.conversation.setPlainText(content)

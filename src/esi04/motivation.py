@@ -1,4 +1,4 @@
-"""Bodily actions compete with questions; spoken replies do not require a button."""
+"""Bodily maintenance remains independent of ordinary, freely initiated speech."""
 
 from esi03.motivation import Brain as PreviousBrain
 from esi04.dialogue import polite
@@ -13,6 +13,8 @@ class Brain(PreviousBrain):
     def candidates(self, world, allow_requests=True):
         self.state.cooldowns.pop("ask_talk", None)
         choices = super().candidates(world, allow_requests)
+        if getattr(self.experience, "free_speech", False):
+            choices = [c for c in choices if not c["kind"].startswith("ask_")]
         choices = [c for c in choices if c["kind"] not in {"rest", "drink"}
                    or world.place("rest" if c["kind"] == "rest" else "water") is not None]
         # A previously reachable cell can become occupied after furniture placement.
@@ -40,6 +42,10 @@ class Brain(PreviousBrain):
     def user_turn(self, world, turn):
         if (turn["source"] not in {"text", "microphone", "recording", "confirmed_recognition"}
                 or turn.get("recognition_needs_confirmation") or not turn.get("use_in_dialogue_history", True)):
+            return []
+        if getattr(self.experience, "free_speech", False):
+            self.state.last_contact, self.state.last_contact_epoch = world.elapsed, turn["epoch"]
+            self.state.has_contact = True
             return []
         relation = self.experience.link_reply(turn)
         if relation:

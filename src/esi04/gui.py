@@ -20,7 +20,7 @@ from esi04.world_gui import WorldPanel
 
 class Window(PreviousWindow):
     release_name = "ESI-04"
-    heading_text = f"ESI-04 {__version__}  |  知識を使い、対話し、自分の考えを伝える"
+    heading_text = f"ESI-04 {__version__}  |  自由に話し、必要なときに考える"
     window_title = "ESI-04 — 会話・空間・画面・PC操作"
     desktop_filename = "esi04-desktop.json"
     growth_panel_class = GrowthPanel
@@ -46,6 +46,10 @@ class Window(PreviousWindow):
         self.plugin_panel = None
         self.computer_supervisor, self.computer_panel, self.computer_scroll = None, None, None
         super().__init__(*args, **kwargs)
+        self.request_card.hide()
+        self.motivation_panel.enabled.setText("身体の自発的な活動を使う")
+        self.motivation_panel.note.setText("仮想身体の維持・休息・探索を選び、実際に観測した変化から学びます。\n"
+            "自分からの発話は通常の会話欄に表示します。返答ボタンや回答期限はありません。")
         self.setup_computer()
         self.plugin_panel = PluginPanel(self)
         self.plugin_scroll = QScrollArea()
@@ -167,6 +171,24 @@ class Window(PreviousWindow):
         if self.computer_panel and isinstance(self.computer_panel, ComputerPanel):
             self.computer_panel.refresh()
             self.computer_panel.runtime_status(self.session.status)
+
+    def refresh_motivation(self, view, status):
+        super().refresh_motivation(view, status)
+        self.request_card.hide()
+        self.request_id = None
+
+    def transcript_before(self, entries, view, epoch):
+        first = view["turns"][0]["epoch"] if view["turns"] else self.session.epoch+1
+        for speech in view.get("utterances", []):
+            if (epoch == 0 and speech["after_epoch"] < first) or (epoch and speech["after_epoch"] == epoch):
+                entries.append("ESI："+speech["text"])
+                if speech["stage"] == "failed":
+                    entries.append("［この発言は音声にできませんでした］")
+
+    def transcript_processing(self, entries, turn):
+        for notice in turn.get("processing_updates", []):
+            if notice.get("started") or notice["stage"] in {"speaking", "played", "file_only"}:
+                entries.append("ESI（処理中）："+notice["text"])
 
     def closeEvent(self, event):
         if isinstance(self.computer_panel, ComputerPanel):

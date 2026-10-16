@@ -43,6 +43,7 @@ def reply_relation(text, question):
 
 
 class Experience(PreviousExperience):
+    free_speech = False  # Session opts in; old save readers can still inspect archived questions.
     semantic_replies = False  # The session enables semantic binding for normal model dialogue.
     outcome_sources = PreviousExperience.outcome_sources | {"computer_observation", "game_observation"}
     state_class = ExperienceState
@@ -95,6 +96,8 @@ class Experience(PreviousExperience):
                    timing="compared_with_other_actions", needs=state.needs.model_dump())
 
     def question_candidate(self, world):
+        if self.free_speech:
+            return None
         state = self.state
         if (not state.preferences.proactive or world.conversation_active or self.pending_question()
                 or state.availability == "busy" or world.elapsed < state.preferences.quiet_until):
@@ -127,6 +130,8 @@ class Experience(PreviousExperience):
         return question
 
     def link_reply(self, turn):
+        if self.free_speech:
+            return None
         question = self.reply_candidate(turn["input"])
         if question is None:
             return None
@@ -196,8 +201,16 @@ class Experience(PreviousExperience):
         elif not DECLINE.fullmatch(text):
             state.availability = "present"
             state.preferences.quiet_until = 0
-        if turn.get("question_reply"):
+        if not self.free_speech and turn.get("question_reply"):
             self.apply_reply(turn, turn["question_reply"])
+
+    def interest(self, topic, question, reason, origin, source_id, priority=0.6):
+        # Old followups were stored as the topic itself. Never wrap a sentence again.
+        # Existing records remain inspectable; generated questions are not new interests.
+        if self.free_speech and re.search(r"[？?]|教えて(?:いただけ|もらえ)|でしょうか|ですか|ますか", topic):
+            return None
+        return super().interest(topic, f"{topic}を確かめる" if self.free_speech else question,
+                                reason, origin, source_id, priority)
 
     def finish_question(self, action_id, stage, source_id):
         question = next((q for q in self.state.dialogue_questions if q.action_id == action_id

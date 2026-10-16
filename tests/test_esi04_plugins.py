@@ -26,6 +26,7 @@ def observation(**changes):
 
 
 def connected(session):
+    session.experience.free_speech = False  # Dormant pre-0.4.8 plugin compatibility only.
     session.experience.semantic_replies = False  # Legacy plugin-only fixtures avoid an actual model call.
     session.environment_mode("minecraft.fabric")
     session.status.update(plugin_connected=True, plugin_session="session")

@@ -15,7 +15,7 @@ from esi04.session import Session, inspect_database
 
 def completion(answer='一般知識を使って説明します。', **changes):
     return dict(reply_relation='none', emotion='neutral', emotion_reason='', answer=answer,
-                needs_clarification=False, followup='', answer_quote='') | changes
+                needs_clarification=False, followup='', answer_quote='', appraisal_target='esi') | changes
 
 
 def model(*replies):
@@ -70,48 +70,37 @@ def test_general_knowledge_is_not_stripped_or_replaced_with_acknowledgement(tmp_
         assert not s.knowledge.entries()  # Generated text never teaches itself factual memories.
 
 
-def test_reply_to_own_question_understands_an_omitted_subject_and_a_question_in_the_reply(tmp_path):
+def test_reply_to_spontaneous_speech_uses_history_without_pending_question(tmp_path):
     path = tmp_path/'save.db'
     with closing(Session(path, Settings(playback=False))) as s:
-        q = s.experience.open_question('休日は何をして過ごすのが好きですか？', '休日', '相手の関心を知りたい')
+        spoken = s.utter('休日は何をして過ごすのが好きですか？', 'observation:holiday')
         text = '囲碁です。なぜ読み合いが面白くなると思いますか？'
-        turn = s.create_turn(text)
-        assert q.stage == 'pending' and not s.knowledge.entries()
-        factory, requests = model(completion('囲碁がお好きなのですね。相手の手を予想し、予想外の一手から新しい発見ができるからだと思います。', reply_relation='answered'))
-        chunks = []
-        result = DialogueLLM(s.settings, factory).stream(text, s.history(turn['id']), Cancellation(),
-            lambda _: None, chunks.append, s.dialogue_context(text))
-        assert q.text in requests[0]['messages'][0]['content']  # Autonomous questions need not be in turn history.
-        s.dialogue_result(turn['id'], result)
-        s.update_turn(turn['id'], stage='complete', reply=result['text'])
-        assert q.stage == 'answered' and q.reply_quote == text and q.reply_turn == turn['id']
-        assert '囲碁' in result['text'] and '予想' in result['text']
+        result, requests = reply(s, text, completion('囲碁がお好きなのですね。相手の手を予想し、予想外の一手から発見できるからだと思います。'))
+        assert any(m['content'] == spoken.text for m in requests[0]['messages'][1:])
+        assert not s.experience.pending_question() and not s.experience.state.dialogue_questions
+        assert '囲碁' in result['text'] and not s.knowledge.entries()
     with closing(Session(path)) as restored:
-        assert restored.experience.state.dialogue_questions[-1].stage == 'answered'
+        assert restored.cognition.utterances[-1].text == spoken.text
         assert inspect_database(path).release == 'ESI-04'
 
-
-def test_contextual_short_answer_is_learned_with_both_sides_of_evidence_once(tmp_path):
+def test_normal_teaching_keeps_user_evidence_and_processing_is_applied_once(tmp_path):
     with closing(Session(tmp_path/'save.db', Settings(playback=False))) as s:
-        q = s.experience.open_question('光る木はいつ光りますか？', '光る木', '説明を知りたい')
-        result, _ = reply(s, '昼も光ります', completion('昼間も光るのですね。夜だけではないと覚えておきます。', reply_relation='answered'))
-        assert q.stage == 'answered'
+        s.utter('光る木の話に興味があります。', 'observation:tree')
+        result, _ = reply(s, '光る木は昼も光る植物です。', completion('昼間も光るのですね。'))
         belief = s.knowledge.entries()[0]
-        assert belief['label'] == '光る木' and belief['value'] == '昼も光ります'
-        assert belief['evidence'][0]['question'] == q.text
+        assert belief['label'] == '光る木' and '昼も光る植物' in belief['value']
+        assert belief['evidence'][0]['quote'] in '光る木は昼も光る植物です。'
         before = s.dump()
-        s.dialogue_result(q.reply_turn, result)
+        s.dialogue_result(next(reversed(s.turns)), result)
         assert s.dump() == before
 
-
-def test_topic_change_and_unrelated_yes_do_not_answer_an_old_question(tmp_path):
+def test_topic_change_and_yes_do_not_answer_or_create_an_old_request(tmp_path):
     with closing(Session(tmp_path/'save.db', Settings(playback=False))) as s:
-        q = s.experience.open_question('光る木はいつ光りますか？', '光る木', '説明を知りたい')
-        reply(s, 'ところで、おすすめの本を教えてください', completion('どんな分野の本を探しているかで選び方が変わります。', reply_relation='other'))
-        assert q.stage == 'unobserved'
-        reply(s, 'はい', completion('小説なら、好きな雰囲気を手掛かりに選べます。'))
-        assert q.stage == 'unobserved' and not s.knowledge.entries()
-
+        s.utter('光る木はいつ光りますか？', 'observation:tree')
+        reply(s, 'ところで、おすすめの本を教えてください', completion('どんな分野の本を探しているかで選び方が変わります。'))
+        reply(s, 'はい', completion('はい。'))
+        assert not s.experience.pending_question() and not s.knowledge.entries()
+        assert not s.experience.state.question_actions
 
 def test_bare_agreement_and_casual_style_are_repaired_before_speech(tmp_path):
     with closing(Session(tmp_path/'save.db', Settings(playback=False))) as s:
@@ -140,7 +129,7 @@ def test_style_reaches_the_model_and_application_receipts_without_rewriting_quot
         result, _ = reply(s, 'こんにちは')
         assert result['text'].endswith('ます。')
         result, _ = reply(s, 'おはよう')
-        assert 'ございます' in result['text'] and '過ごしますか' in result['text']
+        assert result['text']=='おはようございます。' and not result.get('asked_followup')
         result, _ = reply(s, '机の上に花束を置いて')
         assert '選べます' in result['text'] and '選べるよ' not in result['text']
         result,_=reply(s,'私の好みについて話します',completion('「ありがとう」という言葉が好きです。教えてくれてありがとう。'))
@@ -149,16 +138,17 @@ def test_style_reaches_the_model_and_application_receipts_without_rewriting_quot
         assert '「怒りを感じた」' in result['text'] and result['text'].endswith('怒りを感じました。')
 
 
-def test_no_followup_is_added_when_disabled_and_a_new_one_is_saved_when_enabled(tmp_path):
+def test_followups_obey_preferences_but_create_no_question_protocol(tmp_path):
     with closing(Session(tmp_path/'save.db', Settings(playback=False))) as s:
         s.character_operation('preferences', {'proactive':False})
         result, _ = reply(s, '今日は囲碁をしました', completion('対局を楽しまれたのですね。', followup='どんな一手が印象的でしたか？'))
         assert not result['asked_followup'] and not s.experience.pending_question()
         s.character_operation('preferences', {'proactive':True})
-        s.world.conversation_active = True  # Real Runtime sets this while a reply is generated.
+        s.world.conversation_active = True
         result, _ = reply(s, '今日は囲碁をしました', completion('対局を楽しまれたのですね。', followup='どんな一手が印象的でしたか？'))
-        assert result['asked_followup'] and s.experience.pending_question().text in result['text']
-
+        assert result['asked_followup'] and 'どんな一手' in result['text']
+        assert not s.experience.pending_question() and not s.experience.state.dialogue_questions
+        assert not any(i.topic.startswith('どんな一手') for i in s.experience.state.interests)
 
 def test_anxiety_agitation_and_anger_are_bounded_persisted_and_recover(tmp_path):
     path = tmp_path/'save.db'
@@ -248,14 +238,14 @@ def test_unpunctuated_spoken_question_also_rejects_a_bare_agreement(tmp_path):
         assert len(requests)==2 and '球形' in result['text']
 
 
-def test_a_question_generated_inside_answer_is_recorded_without_a_reply_button(tmp_path):
+def test_a_question_inside_normal_speech_continues_as_ordinary_dialogue(tmp_path):
     with closing(Session(tmp_path/'save.db', Settings(playback=False))) as s:
         result,_=reply(s,'今日は対局を楽しみました',completion('対局を楽しまれたのですね。どの一手が印象的でしたか？'))
-        assert result['asked_followup']
-        assert s.experience.pending_question().text=='どの一手が印象的でしたか？'
-        reply(s,'中央の切り込みです',completion('中央の切り込みが印象に残ったのですね。形勢が動く一手には面白さがあります。',reply_relation='answered'))
-        assert s.experience.state.dialogue_questions[-1].stage=='answered'
-
+        assert result['asked_followup'] and not s.experience.pending_question()
+        result, requests=reply(s,'中央の切り込みです',completion('なるほど。'))
+        assert len(requests)==1 and result['text']=='なるほど。'
+        assert any('どの一手' in m['content'] for m in requests[0]['messages'][1:])
+        assert not s.experience.state.dialogue_questions
 
 def test_truncated_response_is_recomposed_before_voice(tmp_path):
     with closing(Session(tmp_path/'save.db', Settings(playback=False))) as s:
@@ -266,10 +256,9 @@ def test_truncated_response_is_recomposed_before_voice(tmp_path):
 
 def test_a_boolean_answer_is_not_saved_as_a_meaningless_factual_value(tmp_path):
     with closing(Session(tmp_path/'save.db', Settings(playback=False))) as s:
-        q=s.experience.open_question('光る木は夜だけ光りますか？','光る木','確かめたい')
-        reply(s,'いいえ',completion('夜だけではないということですね。',reply_relation='answered'))
-        assert q.stage=='answered' and not s.knowledge.entries()
-
+        s.utter('光る木は夜だけ光りますか？', 'observation:tree')
+        reply(s,'いいえ',completion('夜だけではないということですね。'))
+        assert not s.knowledge.entries() and not s.experience.pending_question()
 
 def test_emotion_matches_its_own_appraisal_and_stays_mild(tmp_path):
     with closing(Session(tmp_path/'save.db', Settings(playback=False))) as s:
@@ -280,25 +269,21 @@ def test_emotion_matches_its_own_appraisal_and_stays_mild(tmp_path):
         assert result['affect_appraisal']['emotion']=='anxious'
 
 
-def test_extracted_answer_clause_outweighs_an_inconsistent_relation_and_keeps_provenance(tmp_path):
+def test_mixed_reply_and_new_question_use_normal_history_without_automatic_topic(tmp_path):
     with closing(Session(tmp_path/'save.db',Settings(playback=False))) as s:
-        q=s.experience.open_question('休日は何をして過ごしますか？','休日','相手の関心を知りたい')
-        result,_=reply(s,'友人と囲碁をします。読み合いはなぜ面白いのでしょうか？',
-            completion('囲碁を楽しまれるのですね。互いの手を予測する過程に面白さがあると思います。',
-                       reply_relation='other',answer_quote='友人と囲碁をします。'))
-        assert q.stage=='answered' and q.answer_quote=='友人と囲碁をします。'
-        claim=s.knowledge.entries()[0]
-        assert claim['value']=='友人と囲碁をします。' and claim['evidence'][0]['quote'] in q.reply_quote
-        assert result['question_binding']['relation']=='answered'
+        s.utter('休日は何をして過ごしますか？', 'observation:holiday')
+        result,requests=reply(s,'友人と囲碁をします。読み合いはなぜ面白いのでしょうか？',
+            completion('囲碁を楽しまれるのですね。互いの手を予測する過程に面白さがあると思います。'))
+        assert any(m['content']=='休日は何をして過ごしますか？' for m in requests[0]['messages'][1:])
+        assert not result['question_binding'] and not s.experience.state.dialogue_questions
+        assert not any('？' in i.topic for i in s.experience.state.interests)
 
-
-def test_an_answer_to_esis_question_cannot_receive_only_a_bare_agreement(tmp_path):
+def test_an_answer_to_esis_speech_can_naturally_receive_a_short_acknowledgement(tmp_path):
     with closing(Session(tmp_path/'save.db',Settings(playback=False))) as s:
-        s.experience.open_question('好きな色は何ですか？','好きな色','相手を知りたい')
-        result,requests=reply(s,'青です',completion('そうなんですね。',reply_relation='answered',answer_quote='青です'),
-            completion('青がお好きなのですね。教えていただいた好みとして覚えておきます。',reply_relation='answered',answer_quote='青です'))
-        assert len(requests)==2 and '青' in result['text']
-
+        s.utter('好きな色は何ですか？','observation:color')
+        result,requests=reply(s,'青です',completion('そうなんですね。'))
+        assert len(requests)==1 and result['text']=='そうなんですね。'
+        assert not s.experience.pending_question()
 
 def test_relief_in_esis_own_reply_does_not_increase_the_previous_anger(tmp_path):
     with closing(Session(tmp_path/'save.db',Settings(playback=False))) as s:

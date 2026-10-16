@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from esi04.save_history import discover_saves, history_page, save_summary
+from esi04.save_history import discover_saves, history_page, save_summary, utterance_page
 
 
 def choose_recovery(parent, root, current):
@@ -71,18 +71,27 @@ class HistoryPanel(QWidget):
         path = Path(self.main.session.store.path)
         try:
             summary = save_summary(path)
-            self.identity.setText(f"保存先：{path.resolve()}\n{summary['release']} / {summary['name']} / 保存済みの会話 {summary['turns']}件\n会話タブは直近12件を表示します。この画面で以前の記録も読めます。")
+            self.identity.setText(f"保存先：{path.resolve()}\n{summary['release']} / {summary['name']} / 保存済みの会話 {summary['turns']}件 / 自発的な発言 {summary['utterances']}件\n会話タブは直近12件を表示します。この画面で以前の記録も読めます。")
             rows = history_page(path, self.before)
+            high = self.before if self.before is not None else 2**63-1
+            low = rows[-1][0] if rows else 0
+            speech = utterance_page(path, low, high)
             if not rows:
                 self.older.setEnabled(False)
-                if not self.text.toPlainText():
+                older_speech="\n\n".join("ESI："+s["text"] for s in speech)
+                existing=self.text.toPlainText()
+                if older_speech:
+                    self.text.setPlainText(older_speech+("\n\n"+existing if existing else ""))
+                elif not existing:
                     self.text.setPlainText("このセーブには会話の記録がありません。以前のセーブも確認できます。")
                 return
             self.before = rows[-1][0]
             lines = []
             for _, turn in reversed(rows):
-                lines.extend(["あなた："+(turn["input"] or "（聞き取りなし）"),
-                              "ESI："+turn["reply"], ""])
+                lines.append("あなた："+(turn["input"] or "（聞き取りなし）"))
+                lines.extend("ESI（処理中）："+n["text"] for n in turn.get("processing_updates", []) if n.get("started"))
+                lines.extend(["ESI："+turn["reply"], ""])
+                lines.extend("ESI："+s["text"] for s in speech if s["after_epoch"] == turn["epoch"])
             previous = self.text.toPlainText()
             self.text.setPlainText("\n\n".join(lines)+(previous and "\n\n"+previous))
             self.older.setEnabled(True)

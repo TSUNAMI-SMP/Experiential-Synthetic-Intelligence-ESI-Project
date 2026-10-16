@@ -64,7 +64,8 @@ class DesktopViews(PreviousViews):
         with self.main.session.lock:
             session = self.main.session
             preferences = session.experience.state.preferences
-            cognition = session.cognition.model_dump(exclude={"processed", "screen_teachings", "last_screen"})
+            cognition = session.cognition.model_dump(exclude={"processed", "screen_teachings", "last_screen", "utterances"})
+            cognition["utterances"] = [u.model_dump(exclude={"audio"}) for u in session.cognition.utterances[-6:]]
             cognition["summaries"] = cognition["summaries"][-12:]
             body = session.world.body.model_dump()
             if session.plugins.active_id:
@@ -93,6 +94,9 @@ class DesktopViews(PreviousViews):
         cognition = state["cognition"]
         summaries = cognition["summaries"]
         label = summaries[-1]["activity"]+"："+summaries[-1]["subject"] if summaries else "今は、周りの様子を見ているよ"
+        speech = getattr(self.main.runtime, "aux_speech", None)
+        if speech:
+            label = speech["text"]
         self.bubble.setText(label[:60]+"  …")
         self.bubble.adjustSize()
         self.bubble.move(self.avatar.x()+max(0, self.avatar.width()-self.bubble.width()), self.avatar.y())
@@ -174,6 +178,8 @@ class DesktopViews(PreviousViews):
         state = self.state()
         cognition = state["cognition"]
         lines = ["今していること："+cognition["activity"], "注意を向けているもの："+cognition["attention"], ""]
+        for speech in cognition.get("utterances", [])[-6:]:
+            lines.extend(["ESI："+speech["text"], ""])
         for entry in reversed(cognition["summaries"]):
             lines.extend([entry["activity"]+" — "+entry["subject"], "選んだ理由："+entry["reason"]])
             if entry["alternatives"]:

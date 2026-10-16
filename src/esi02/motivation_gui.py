@@ -33,11 +33,11 @@ class MotivationPanel(QWidget):
         self.enabled = QCheckBox("自発的な行動・お願いを使う")
         self.enabled.toggled.connect(lambda checked: self.window.motivation_action("enabled", checked))
         layout.addWidget(self.enabled)
-        note = QLabel(
+        self.note = QLabel(
             "仮想身体から欲求を計算します。お願いへの対応は任意です。断ったり後にした場合は、同じお願いを15分間控えます。\n記憶と、行動後の結果の見通しを更新します。結果を確認できない行動では学習しません。"
         )
-        note.setWordWrap(True)
-        layout.addWidget(note)
+        self.note.setWordWrap(True)
+        layout.addWidget(self.note)
         self.needs = self.bars(layout, NEEDS)
         layout.addWidget(QLabel("仮想の調整値（生化学の測定や、実際の感情の証明ではありません）"))
         self.modulators = self.bars(layout, MODULATORS)

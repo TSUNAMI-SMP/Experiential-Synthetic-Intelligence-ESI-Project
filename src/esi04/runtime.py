@@ -16,6 +16,7 @@ from esi04.deliberation import deliberate
 from esi04.dialogue import DialogueLLM
 from esi04.games import GamePlayer
 from esi04.plugin_runtime import EnvironmentRuntime
+from esi04.runtime_speech import SpeakingRuntime
 
 SCREEN_QUERY = re.compile(r"(?:画面|動画|ウィンドウ).*(?:見える|映って|何|どこ|どう|読んで|見て|教えて|説明|ですか|ますか|[？?])|(?:この|今の).*(?:ボタン|アイコン|入力欄).*(?:何|どこ|どう|教えて|ですか|ますか|[？?])")
 SCREEN_TEACHING = re.compile(r"(?:この|今の|画面の).*(?:ボタン|アイコン|入力欄|表示|画面).*(?:は|が|を).+(?:です|だよ|という|っていう|使う|使います)[。！!\s]*$")
@@ -38,7 +39,7 @@ def requested_skill(text, skills):
     return matches[0]
 
 
-class Runtime(EnvironmentRuntime, PreviousRuntime):
+class Runtime(SpeakingRuntime, EnvironmentRuntime, PreviousRuntime):
     def __init__(self, session, *args, computer=None, services=None, **kwargs):
         kwargs.setdefault("llm", DialogueLLM(session.settings))
         super().__init__(session, *args, **kwargs)
@@ -146,12 +147,15 @@ class Runtime(EnvironmentRuntime, PreviousRuntime):
         else:
             raise ValueError("利用できないPC操作です。")
         self.computer_task = {"operation": operation, "cancellation": cancellation}
+        self.computer_task["id"] = uid()
         self._status("computer_error", "")
         self._status("computer_result", None)
         self._status("game_step", {})
         self._status("computer_phase", "observing" if operation == "observe" else "playing" if operation == "game" else "operating")
         self._job("computer", kind, function, *arguments, operation=operation, cancellation=cancellation,
                   turn_id=turn_id, generation=self.computer.grant.generation)
+        if operation == "observe":
+            self._work_notice("observe", turn_id, self.computer_task["id"])
 
     def _handle(self, name, data):
         if name == "game_step":
@@ -229,7 +233,8 @@ class Runtime(EnvironmentRuntime, PreviousRuntime):
                     if self.session.apply_focus(job["context_key"], result):
                         if result.action == "research":
                             policy = self.session.research.policy
-                            if policy.web_enabled or policy.read_roots:
+                            if (self.session.experience.state.preferences.exploration
+                                    and (policy.web_enabled or policy.read_roots)):
                                 self._control("research_interest", result.target_id)
                         elif result.action == "practice" and self.computer and self.computer.grant.control:
                             self._start_computer("replay", {"id": result.target_id})
@@ -282,6 +287,7 @@ class Runtime(EnvironmentRuntime, PreviousRuntime):
             super()._schedule_memory()
 
     def _schedule(self):
+        self._pump_speech()
         if self.session.plugins.active_id:
             self.schedule_environment()
             AudioRuntime._schedule(self)
@@ -317,7 +323,7 @@ class Runtime(EnvironmentRuntime, PreviousRuntime):
                 or self._voice_busy() or self.session.status.get("audio_input", {}).get("asr_busy")):
             return
         preferences, world = self.session.experience.state.preferences, self.session.world
-        if (not self.settings.idle_deliberation or not preferences.idle_activity or not self.session.brain.state.enabled
+        if (not self.settings.idle_deliberation or not preferences.idle_activity
                 or self.session.brain.active or self.session.cognition.active_object or world.destination
                 or any(j["kind"] in {"reply", "memory", "tool", "deliberation"} for j in self.jobs.values())):
             return

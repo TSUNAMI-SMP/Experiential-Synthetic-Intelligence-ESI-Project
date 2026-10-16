@@ -229,7 +229,7 @@ def test_idle_research_reads_a_real_allowed_folder_and_keeps_its_sources(tmp_pat
         session.close()
 
 
-def test_full_owner_links_a_normal_spoken_answer_to_its_generated_question(tmp_path):
+def test_full_owner_keeps_a_generated_question_in_normal_conversation(tmp_path):
     from test_esi04_conversation import completion, model
 
     from esi04.dialogue import DialogueLLM
@@ -245,11 +245,11 @@ def test_full_owner_links_a_normal_spoken_answer_to_its_generated_question(tmp_p
         runtime.start()
         runtime.send('text','今日は友人と囲碁をしました')
         wait_for(lambda: len(session.turns)==1 and next(reversed(session.turns.values()))['stage']=='complete')
-        question=session.experience.pending_question()
-        assert question and question.text=='どの一手が印象的でしたか？'
+        assert not session.experience.pending_question()
+        assert 'どの一手が印象的でしたか？' in next(reversed(session.turns.values()))['reply']
         runtime.send('text','中央の切り込みです')
         wait_for(lambda: len(session.turns)==2 and next(reversed(session.turns.values()))['stage']=='complete')
-        assert question.stage=='answered' and question.reply_quote=='中央の切り込みです'
+        assert not session.experience.pending_question() and not session.experience.state.dialogue_questions
         turn=next(reversed(session.turns.values()))
         assert '切り込み' in turn['reply'] and turn['chunks']
         assert len(requests)==2 and not session.status.get('error')

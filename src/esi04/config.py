@@ -10,6 +10,9 @@ from esi03.config import Settings as PreviousSettings
 class Settings(PreviousSettings):
     release: Literal["ESI-04"] = "ESI-04"
     reply_tokens: int = Field(default=512, ge=128, le=1024)
+    deliberation_tokens: int = Field(default=640, ge=256, le=1024)
+    deep_reply_tokens: int = Field(default=896, ge=384, le=1536)
+    deliberation_timeout: float = Field(default=300, ge=30, le=600)
     vision_url: str = "http://127.0.0.1:8081"
     vision_model_path: str = "models/qwen3-vl-2b/Qwen3VL-2B-Instruct-Q4_K_M.gguf"
     vision_projector_path: str = "models/qwen3-vl-2b/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf"

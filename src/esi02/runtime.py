@@ -625,18 +625,20 @@ class Runtime:
             j.get("turn_id") == turn_id and j["kind"] in {"reply", "voice"} for j in self.jobs.values()
         )
         if current["generation_done"] and not self.voice and not active:
-            self.session.update_turn(
-                turn_id,
-                stage="failed" if current.get("speech_failed") else "complete",
-                error=self.session.turns[turn_id].get("speech_error", {}).get("message") if current.get("speech_failed") else None,
-                speech_status="failed" if current.get("speech_failed") else "played" if self.settings.playback else "file_only",
-                metrics={
-                    "first_token_seconds": current["first_token"],
-                    "playback_requested_seconds": current["first_voice"],
-                    "total_seconds": time.monotonic() - current["accepted_at"],
-                },
-            )
-            self._status("phase", "speech_failed" if current.get("speech_failed") else "waiting")
+            # GUI snapshots must see the completed turn and its retry-ready phase together.
+            with self.session.lock:
+                self.session.update_turn(
+                    turn_id,
+                    stage="failed" if current.get("speech_failed") else "complete",
+                    error=self.session.turns[turn_id].get("speech_error", {}).get("message") if current.get("speech_failed") else None,
+                    speech_status="failed" if current.get("speech_failed") else "played" if self.settings.playback else "file_only",
+                    metrics={
+                        "first_token_seconds": current["first_token"],
+                        "playback_requested_seconds": current["first_voice"],
+                        "total_seconds": time.monotonic() - current["accepted_at"],
+                    },
+                )
+                self._status("phase", "speech_failed" if current.get("speech_failed") else "waiting")
 
     def _schedule_request(self):
         if (

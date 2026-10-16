@@ -23,6 +23,7 @@ from esi04.experience import NO, YES, Experience
 from esi04.motivation import Brain
 from esi04.plugin_session import EnvironmentSession
 from esi04.plugins import PluginState, plugin_enabled
+from esi04.speaking import SpeakingSession
 from esi04.state import Cognition, ExperienceState, Preferences
 from esi04.vision import Observation as ScreenObservation
 from esi04.world import World, scene_command
@@ -36,7 +37,7 @@ class SavedState(PreviousSavedState):
     plugins: PluginState = Field(default_factory=PluginState)
 
 
-class Session(EnvironmentSession, PreviousSession):
+class Session(SpeakingSession, EnvironmentSession, PreviousSession):
     release_name = "ESI-04"
     settings_class, state_class = Settings, SavedState
     world_class, experience_class, brain_class = World, Experience, Brain
@@ -49,7 +50,12 @@ class Session(EnvironmentSession, PreviousSession):
         self.plugins = PluginState()
         self._history_ready = False
         super().__init__(*args, **kwargs)
+        self.experience.free_speech = True
         self.experience.semantic_replies = True
+        self.migrate_speaking()
+        for entry in self.cognition.utterances:
+            if entry.stage in {"displayed", "speaking"}:
+                self.utterance_delivery(entry.id, "interrupted")
         self.plugins.autonomous = False
         self.plugins.learning.pending = None
         self.plugins.life.wait_until = 0
@@ -89,6 +95,8 @@ class Session(EnvironmentSession, PreviousSession):
             self.store.db.executemany("INSERT OR REPLACE INTO esi04_conversations VALUES (?,?,?)",
                                      [(turn["id"], turn["epoch"], json.dumps(turn, ensure_ascii=False))
                                       for turn in self.turns.values()])
+            for speech in self.cognition.utterances:
+                self._archive_utterance(speech)
             result = super().checkpoint(initial)
         self._history_ready = True
         return result
@@ -107,6 +115,7 @@ class Session(EnvironmentSession, PreviousSession):
             self.plugins.suspended_id = self.plugins.active_id
             self.plugins.active_id, self.plugins.autonomous = "", False
         self.experience.semantic_replies = True
+        self.experience.free_speech = True
         self.cognition.pending_computer_task = ""  # Interrupted real-PC requests never resume on a new grant.
 
     def _remember(self, turn):
@@ -194,15 +203,14 @@ class Session(EnvironmentSession, PreviousSession):
         with self.lock:
             context = super().dialogue_context(query)
             character = self.experience.context()
-            candidate = self.experience.question_candidate(self.environment_world())
-            state = self.experience.state
             # The idle scheduler excludes active conversations; in-conversation followups
             # must instead use the person's preferences and the current dialogue state.
-            character["allow_followup"] = (state.preferences.proactive and state.availability != "busy"
-                and state.elapsed >= state.preferences.quiet_until and not self.experience.pending_question())
-            character["askable_interests"] = [candidate["interest"].model_dump()] if candidate else []
+            character["allow_followup"] = self.can_initiate_speech()
+            character["askable_interests"] = []
+            character.pop("pending_question", None)
+            character["free_speech"] = True
             current = next(reversed(self.turns.values()), {})
-            cognition = self.cognition.model_dump(exclude={"processed", "screen_teachings", "last_screen"})
+            cognition = self.cognition.model_dump(exclude={"processed", "screen_teachings", "last_screen", "utterances"})
             cognition["summaries"] = cognition["summaries"][-2:]
             context.update(character=character, virtual_world=self.world.context(),
                            dialogue={"reply_link": current.get("question_reply", {}),
@@ -216,8 +224,7 @@ class Session(EnvironmentSession, PreviousSession):
                                      "plugin_request": current.get("plugin_request"),
                                      "computer_available": self.status.get("computer_access", False)})
             context["knowledge_policy"] = POLICY
-            candidate = self.experience.reply_candidate(query)
-            context["dialogue"]["question_candidate"] = candidate.model_dump() if candidate else None
+            context["dialogue"]["free_speech"] = True
             context["environment"] = self.environment_context()
             if self.plugins.active_id:
                 context["virtual_world"] = {"enabled": False, "body": {}, "stimulus": {}, "objects": []}
@@ -271,19 +278,18 @@ class Session(EnvironmentSession, PreviousSession):
         self.cognition.intention = "think"
         self.agency.summarize("次の活動を考える", plan.action, plan.reason, [plan.target_id] if plan.target_id else [],
                               alternatives=plan.alternatives, certainty="inferred")
-        if plan.action == "inspect":
+        if plan.action == "inspect" and self.brain.state.enabled:
             obj = next((o for o in self.world.objects if o.id == plan.target_id and o.discovered and o.quantity > 0), None)
             if obj and not self.brain.active and not self.cognition.active_object:
                 self.cognition.active_object, self.cognition.object_action = obj.id, "inspect"
                 self.cognition.object_started = self.world.elapsed
                 self.cognition.attention_object, self.cognition.attention = obj.id, obj.label
                 self.cognition.intention = "inspect"
-        elif plan.action == "ask":
-            interest = next((i for i in self.experience.state.interests if i.id == plan.target_id), None)
-            if interest and self.experience.state.availability != "busy":
-                interest.priority = max(0.95, interest.priority)
-                self.brain.state.next_decision = self.world.elapsed
-        elif plan.action == "rest" and not self.brain.active and self.world.place("rest") is not None:
+        elif plan.action == "speak":
+            if self.utter(plan.utterance, key, [plan.target_id] if plan.target_id else []):
+                self.cognition.intention = "listen"
+        elif (plan.action == "rest" and self.brain.state.enabled and not self.brain.active
+              and self.world.place("rest") is not None):
             self.brain._begin(self.world, "rest", False)
             self.cognition.intention = "rest"
         self._write([("idle_decision", {"context": key, "plan": plan.model_dump(), "is_factual_evidence": False})])
@@ -309,6 +315,20 @@ class Session(EnvironmentSession, PreviousSession):
     def dialogue_result(self, turn_id, result):
         turn = self.turns[turn_id]
         if turn.get("experience_processed"):
+            return
+        if self.experience.free_speech and not self.plugins.active_id:
+            # Speech is normal conversation. A question mark creates no pending request,
+            # answer deadline, automatic topic, acceptance outcome or mandatory button.
+            turn.update(experience_processed=True, grounding=result.get("grounding", {}),
+                        response_effort=result.get("response_effort", "standard"))
+            appraisal = result.get("affect_appraisal")
+            if appraisal:
+                appraise(self.cognition, appraisal.get("emotion"), appraisal.get("reason", ""), turn_id,
+                         recovering=appraisal.get("recovering", False))
+                turn["affect_appraisal"] = {**appraisal, "is_simulation": True}
+            self.cognition.intention = "listen"
+            self._persist(turn)
+            self._write()
             return
         result = copy.deepcopy(result)
         binding = result.pop("question_binding", None)
@@ -380,7 +400,7 @@ class Session(EnvironmentSession, PreviousSession):
         with self.lock:
             value = super().view()
             value["cognition"] = self.cognition.model_dump(exclude={"processed"})
-            value["questions"] = [q.model_dump() for q in self.experience.state.dialogue_questions[-20:]]
+            value["utterances"] = [u.model_dump() for u in self.cognition.utterances[-20:]]
             return value
 
 

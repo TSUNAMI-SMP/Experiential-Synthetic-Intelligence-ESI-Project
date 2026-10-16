@@ -78,12 +78,14 @@ def test_real_general_knowledge_context_and_own_question_answers(dialogue):
     assert '東京' in text and '100' in text
     text=talk(s,'では気圧の低い山の上なら、さっきの温度はどう変わりますか？')
     assert '低' in text or '下が' in text
-    question=s.experience.open_question('休日は何をして過ごすのが好きですか？','休日','相手の関心を知りたい')
+    s.character_operation('preferences',{'proactive':True})
+    question=s.utter('休日は何をして過ごすのが好きですか？','holiday:real')
     text=talk(s,'友人と囲碁をするのが好きです。どうして読み合いは面白く感じられるのでしょうか？')
-    assert question.stage=='answered' and any(w in text for w in ['囲碁','読み','予測','戦略'])
-    other=s.experience.open_question('好きな色は何色ですか？','好きな色','相手を知りたい')
+    assert question.text in ''.join(m['content'] for m in s.history(''))
+    assert not s.experience.pending_question() and any(w in text for w in ['囲碁','読み','予測','戦略'])
+    s.utter('好きな色は何色ですか？','color:real')
     text=talk(s,'ところで、あなたの名前は何ですか？')
-    assert other.stage=='unobserved' and s.experience.state.character.name in text
+    assert not s.experience.pending_question() and s.experience.state.character.name in text
 
 
 def test_real_gentle_speech_unknown_observation_and_saved_teaching(dialogue):

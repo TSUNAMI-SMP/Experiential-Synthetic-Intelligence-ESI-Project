@@ -65,9 +65,11 @@ def save_summary(path):
         turns = db.execute("SELECT COUNT(*) FROM (SELECT json_extract(payload,'$.turn.id') FROM records "
                            "WHERE kind='turn_state' "+archive+"UNION SELECT json_extract(value,'$.id') "
                            "FROM json_each(?, '$.turns'))", (json.dumps(state),)).fetchone()[0]
+        utterances = db.execute("SELECT COUNT(*) FROM esi04_utterances").fetchone()[0] if db.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='esi04_utterances'").fetchone() else 0
         return {"path": path, "release": release, "agent_id": json.loads(rows.get("agent_id", '""')),
                 "name": character.get("name", "凛音エル"),
-                "turns": max(turns, len(state.get("turns", [])))}
+                "turns": max(turns, len(state.get("turns", []))), "utterances": utterances}
 
 
 def discover_saves(root, current=None):
@@ -122,3 +124,13 @@ def history_page(path, before=None, limit=100):
             ORDER BY json_extract(turn,'$.epoch') DESC LIMIT ?
         """, (json.dumps(state), before if before is not None else 2**63-1, min(200, max(1, limit)))).fetchall()
     return [(epoch, json.loads(turn)) for epoch, turn in rows]
+
+
+def utterance_page(path, low=0, high=2**63-1):
+    """Assistant-only speech in a page's epoch range, independently of event compaction."""
+    with sqlite3.connect(Path(path).resolve().as_uri()+"?mode=ro", uri=True) as db:
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE name='esi04_utterances'").fetchone():
+            return []
+        return [json.loads(row[0]) for row in db.execute(
+            "SELECT payload FROM esi04_utterances WHERE after_epoch>=? AND after_epoch<? "
+            "ORDER BY after_epoch,rowid", (low, high))]
