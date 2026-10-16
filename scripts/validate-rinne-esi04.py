@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication
 
 from esi02.desktop import AvatarWindow
 from esi02.live2d import AudioLiveCanvas
+from esi04.motion import target_pose
 
 PHASES = [
     ("neutral", {}), ("left_arm", {"ParamArmLZ": 10}), ("right_arm", {"ParamArmRZ": 10}),
@@ -28,6 +29,8 @@ PHASES = [
     ("reopened", {}), ("head", {"ParamAngleX": 30}), ("body", {"ParamBodyAngleX": 10}),
     ("hair", {"ParamHairFront": 1}),
 ]
+PHASES += [(emotion, target_pose({"cognition": {"emotion": emotion, "emotion_strength": .45}}, 0))
+           for emotion in ("anxious", "impatient", "angry")]
 ONLY = {"left_arm": {"Arm_viewer_left"}, "right_arm": {"Arm_viewer_right"},
         "both_arms": {"Arm_viewer_left", "Arm_viewer_right"},
         "left_arm_out": {"Arm_viewer_left"}, "right_arm_out": {"Arm_viewer_right"},
@@ -124,6 +127,8 @@ def verify(path, output):
                 assert not changed and digest == baseline["digest"], "Blink did not restore neutral pixels"
             if phase in {"head", "body", "hair"}:
                 assert changed and digest != baseline["digest"], phase+" did not deform"
+            if phase in {"anxious", "impatient", "angry"}:
+                assert changed and digest != baseline["digest"], phase+" changed no pixels"
             results.append({"phase": phase, "changed": sorted(changed), "digest": digest})
             frame.save(str(output/(phase+".png")))
             if len(results) == len(PHASES):

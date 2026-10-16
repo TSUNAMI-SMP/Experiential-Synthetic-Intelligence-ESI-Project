@@ -1,6 +1,7 @@
 """Bodily actions compete with questions; spoken replies do not require a button."""
 
 from esi03.motivation import Brain as PreviousBrain
+from esi04.dialogue import polite
 
 
 class Brain(PreviousBrain):
@@ -26,6 +27,11 @@ class Brain(PreviousBrain):
         elif kind == "drink":
             action.target = world.place("water").position.model_copy(deep=True)
         if kind.startswith("ask_"):
+            if action.text and self.experience.state.character.style != "casual":
+                action.text = polite(action.text)
+                pending = self.experience.pending_question()
+                if pending and pending.action_id == action.id:
+                    pending.text = action.text
             self.state.cooldowns.pop(kind, None)
             if kind == "ask_talk":
                 self.state.request_latches.pop(kind, None)
@@ -43,4 +49,10 @@ class Brain(PreviousBrain):
             answer = {"answered": "accept", "deferred": "later", "declined": "decline"}[relation["relation"]]
             return self.respond(world, self.active.id, answer,
                                 {"type": "explicit_user_response", "turn_id": turn["id"], "quote": turn["input"]})
+        if self.active and self.active.kind == "ask_talk" and relation and relation.get("needs_semantic"):
+            # The old contact detector accepts any YES as an answer. Let the contextual
+            # reply resolve this question instead, while still recording actual contact.
+            self.state.last_contact, self.state.last_contact_epoch = world.elapsed, turn["epoch"]
+            self.state.has_contact = True
+            return []
         return super().user_turn(world, turn)

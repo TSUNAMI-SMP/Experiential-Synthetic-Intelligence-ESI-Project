@@ -29,7 +29,13 @@ from esi04.environment_life import (
     request_review,
 )
 from esi04.minecraft import embodied_world
-from esi04.plugins import EnvironmentAction, EnvironmentObservation, PluginCatalog
+from esi04.plugins import (
+    MINECRAFT_PAUSED,
+    EnvironmentAction,
+    EnvironmentObservation,
+    PluginCatalog,
+    plugin_enabled,
+)
 
 
 class EnvironmentSession:
@@ -48,6 +54,8 @@ class EnvironmentSession:
 
     @atomic
     def environment_mode(self, identifier):
+        if identifier and not plugin_enabled(identifier):
+            raise ValueError(MINECRAFT_PAUSED)
         if identifier and not any(m.id == identifier for m in self.plugin_catalog.manifests()):
             raise ValueError("そのプラグインはインストールされていません。")
         if self.brain.active:
@@ -64,6 +72,8 @@ class EnvironmentSession:
 
     @atomic
     def plugin_options(self, autonomous=None, goal=None):
+        if autonomous and not plugin_enabled(self.plugins.active_id or "minecraft.fabric"):
+            raise ValueError(MINECRAFT_PAUSED)
         if autonomous is not None:
             self.plugins.autonomous = bool(autonomous)
             if autonomous:

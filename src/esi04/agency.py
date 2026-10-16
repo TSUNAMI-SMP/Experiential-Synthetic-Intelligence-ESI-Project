@@ -141,4 +141,7 @@ class Agency:
                 cognition.intention = "rest"
         elif session.experience.state.needs.comfort > 0.45:
             cognition.emotion = "concerned"
+        # A mild conversational appraisal persists while it naturally recovers.
+        from esi04.affect import sustain
+        sustain(cognition)
         return occupied

@@ -12,6 +12,7 @@ from esi02.diagnostics import runtime_observation
 from esi02.speech import SpeechFailure
 from esi03.perception import AcceleratedPerception
 from esi04.config import Settings
+from esi04.legacy_dialogue import DialogueLLM as ReceiptDialogue
 from esi04.runtime import Runtime
 from esi04.session import Session
 
@@ -45,6 +46,7 @@ def setup(tmp_path, **kwargs):
     session = Session(tmp_path / "save.sqlite3", Settings(playback=True, natural_dialogue=False, idle_deliberation=False))
     session.character_operation("preferences", {"proactive": False, "idle_activity": False, "exploration": False})
     voice = Voice(tmp_path)
+    kwargs.setdefault('llm', ReceiptDialogue(session.settings))
     runtime = Runtime(session, tts=voice, memory_llm=Memory(), **kwargs)
     return session, runtime, voice
 

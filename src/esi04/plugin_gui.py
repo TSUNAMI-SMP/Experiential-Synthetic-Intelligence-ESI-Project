@@ -19,13 +19,21 @@ from PySide6.QtWidgets import (
 from esi02.desktop_preferences import write_json
 from esi04.environment_life import current_goal, life_context
 from esi04.minecraft import action_menu
-from esi04.plugins import Connection
+from esi04.plugins import MINECRAFT_PAUSED, Connection, plugin_enabled
 
 
 class PluginPanel(QWidget):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
+        self.suspended = not plugin_enabled("minecraft.fabric")
+        if self.suspended:
+            layout = QVBoxLayout(self)
+            self.status = QLabel(MINECRAFT_PAUSED)
+            self.status.setWordWrap(True)
+            layout.addWidget(self.status)
+            layout.addStretch()
+            return
         self.shown_session = None
         self.observation_id = None
         self.displayed_autonomous = None
@@ -171,6 +179,8 @@ class PluginPanel(QWidget):
                 self.status.setText(str(exception))
 
     def refresh(self):
+        if self.suspended:
+            return
         if self.shown_session is not self.window.session:
             self.reload()
         session = self.window.session

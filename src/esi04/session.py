@@ -12,15 +12,17 @@ from esi02.memory import grams
 from esi03.session import SavedState as PreviousSavedState
 from esi03.session import Session as PreviousSession
 from esi03.storage import atomic
+from esi04.affect import appraise, recover, sustain
 from esi04.agency import Agency
 from esi04.beliefs import Beliefs
 from esi04.computer_models import ScreenTeaching
 from esi04.config import Settings
+from esi04.conversation import POLICY
 from esi04.environment_life import remember_message
-from esi04.experience import YES, Experience
+from esi04.experience import NO, YES, Experience
 from esi04.motivation import Brain
 from esi04.plugin_session import EnvironmentSession
-from esi04.plugins import PluginState
+from esi04.plugins import PluginState, plugin_enabled
 from esi04.state import Cognition, ExperienceState, Preferences
 from esi04.vision import Observation as ScreenObservation
 from esi04.world import World, scene_command
@@ -47,6 +49,7 @@ class Session(EnvironmentSession, PreviousSession):
         self.plugins = PluginState()
         self._history_ready = False
         super().__init__(*args, **kwargs)
+        self.experience.semantic_replies = True
         self.plugins.autonomous = False
         self.plugins.learning.pending = None
         self.plugins.life.wait_until = 0
@@ -100,6 +103,10 @@ class Session(EnvironmentSession, PreviousSession):
     def restore_additional(self, state):
         self.cognition = state.cognition.model_copy(deep=True)
         self.plugins = state.plugins.model_copy(deep=True)
+        if self.plugins.active_id and not plugin_enabled(self.plugins.active_id):
+            self.plugins.suspended_id = self.plugins.active_id
+            self.plugins.active_id, self.plugins.autonomous = "", False
+        self.experience.semantic_replies = True
         self.cognition.pending_computer_task = ""  # Interrupted real-PC requests never resume on a new grant.
 
     def _remember(self, turn):
@@ -123,7 +130,7 @@ class Session(EnvironmentSession, PreviousSession):
         if relation and relation["relation"] == "answered" and len(relation["quote"]) >= 2:
             question = next(q for q in self.experience.state.dialogue_questions if q.id == relation["question_id"])
             source = self.turns.get(relation["source_turn"])
-            if source and not YES.fullmatch(relation["quote"].strip()):
+            if source and not YES.fullmatch(relation["quote"].strip()) and not NO.fullmatch(relation["quote"].strip()):
                 if self.knowledge.from_answer(question, source):
                     changed = [i for i in self.knowledge.entries(include_old=True) if i["source_turn_id"] == source["id"]]
                     self.experience.learned(changed, source["id"])
@@ -170,6 +177,7 @@ class Session(EnvironmentSession, PreviousSession):
     @atomic
     def advance_world(self, seconds, conversing=False, autonomy=False, allow_requests=False):
         with self.lock:
+            recover(self.cognition, seconds)
             if self.plugins.active_id:
                 self.advance_plugin_clock(seconds, conversing)
                 return
@@ -187,7 +195,11 @@ class Session(EnvironmentSession, PreviousSession):
             context = super().dialogue_context(query)
             character = self.experience.context()
             candidate = self.experience.question_candidate(self.environment_world())
-            character["allow_followup"] = bool(candidate)
+            state = self.experience.state
+            # The idle scheduler excludes active conversations; in-conversation followups
+            # must instead use the person's preferences and the current dialogue state.
+            character["allow_followup"] = (state.preferences.proactive and state.availability != "busy"
+                and state.elapsed >= state.preferences.quiet_until and not self.experience.pending_question())
             character["askable_interests"] = [candidate["interest"].model_dump()] if candidate else []
             current = next(reversed(self.turns.values()), {})
             cognition = self.cognition.model_dump(exclude={"processed", "screen_teachings", "last_screen"})
@@ -203,6 +215,9 @@ class Session(EnvironmentSession, PreviousSession):
                                      "computer_stopped": current.get("computer_stopped", False),
                                      "plugin_request": current.get("plugin_request"),
                                      "computer_available": self.status.get("computer_access", False)})
+            context["knowledge_policy"] = POLICY
+            candidate = self.experience.reply_candidate(query)
+            context["dialogue"]["question_candidate"] = candidate.model_dump() if candidate else None
             context["environment"] = self.environment_context()
             if self.plugins.active_id:
                 context["virtual_world"] = {"enabled": False, "body": {}, "stimulus": {}, "objects": []}
@@ -252,6 +267,7 @@ class Session(EnvironmentSession, PreviousSession):
         self.agency.remember_processed(key)
         self.cognition.deliberations += 1
         self.cognition.emotion = plan.emotion
+        sustain(self.cognition)
         self.cognition.intention = "think"
         self.agency.summarize("次の活動を考える", plan.action, plan.reason, [plan.target_id] if plan.target_id else [],
                               alternatives=plan.alternatives, certainty="inferred")
@@ -297,8 +313,30 @@ class Session(EnvironmentSession, PreviousSession):
         result = copy.deepcopy(result)
         binding = result.pop("question_binding", None)
         pending = self.experience.pending_question()
+        candidate = self.experience.reply_candidate(turn["input"])
+        if (binding and candidate and binding.get("question_id") == candidate.id
+                and binding.get("relation") in {"answered", "other", "uncertain", "deferred", "declined"}
+                and binding.get("answer_quote", "") in turn["input"]
+                and binding.get("quote") == turn["input"] and self.experience.semantic_replies
+                and not turn.get("recognition_needs_confirmation") and turn.get("use_in_dialogue_history", True)):
+            relation = {**binding, "source_turn": turn_id, "method": "contextual_model"}
+            turn["question_reply"] = relation
+            self.experience.apply_reply(turn, relation)
+            if (relation["relation"] == "answered" and not YES.fullmatch(turn["input"].strip())
+                    and not NO.fullmatch(turn["input"].strip())):
+                if candidate.topic in candidate.text and self.knowledge.from_answer(candidate, turn):
+                    changed = [i for i in self.knowledge.entries(include_old=True) if i["source_turn_id"] == turn_id]
+                    self.experience.learned(changed, turn_id)
+            if relation["relation"] == "other":
+                self.experience.hold_for_topic(candidate, turn_id)
+            if self.brain.active and self.brain.active.id == candidate.action_id:
+                choice = {"answered": "accept", "deferred": "later", "declined": "decline"}.get(relation["relation"])
+                if choice:
+                    self._record_motivation(self.brain.respond(self.world, candidate.action_id, choice,
+                        {"type": "explicit_user_response", "turn_id": turn_id, "quote": turn["input"]}))
         if (binding and pending and binding.get("question_id") == pending.id
                 and binding.get("relation") == "uncertain" and binding.get("quote") == turn["input"]
+                and not self.experience.semantic_replies
                 and not turn.get("recognition_needs_confirmation") and turn.get("use_in_dialogue_history", True)):
             relation = {**binding, "source_turn": turn_id}
             turn["question_reply"] = relation
@@ -307,6 +345,12 @@ class Session(EnvironmentSession, PreviousSession):
         interest_id = result.pop("asked_interest", None)
         followup = result.pop("asked_followup", False)
         super().dialogue_result(turn_id, result)
+        appraisal = result.get("affect_appraisal")
+        if appraisal:
+            appraise(self.cognition, appraisal.get("emotion"), appraisal.get("reason", ""), turn_id,
+                     recovering=appraisal.get("recovering", False))
+            turn["affect_appraisal"] = {**appraisal, "is_simulation": True}
+            self._persist(turn)
         future_words = " ".join(value for value in (result.get("life_intention", ""),
                                   result.get("followup_text", "") if followup else "") if value)
         self.plugin_dialogue(turn_id, result.get("text", ""), future_words)
@@ -320,10 +364,11 @@ class Session(EnvironmentSession, PreviousSession):
             self.experience.asked(interest_id, "chat:"+turn_id)
         elif followup and result.get("followup_text"):
             in_environment = result.get("grounding", {}).get("policy") == "minecraft_shared_life"
-            self.experience.open_question(result["followup_text"], result["followup_text"][:60] if in_environment else "共有してくれた体験",
+            question = self.experience.open_question(result["followup_text"], result["followup_text"][:60] if in_environment or result.get("intent") == "conversation" else "共有してくれた体験",
                                           "現在の生活と相手の発言から選んだ疑問" if in_environment else "相手の体験の続きを知りたい",
                                           action_id="chat:"+turn_id)
-            self.experience.state.questions += 1
+            if question:
+                self.experience.state.questions += 1
         if result.get("interest_topic"):
             topic = result["interest_topic"]
             self.experience.interest(topic, f"{topic}を実際に確かめてみたい。", "対話で自分の関心を選んだ",

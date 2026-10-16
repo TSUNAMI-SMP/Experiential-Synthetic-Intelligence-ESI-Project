@@ -39,6 +39,18 @@ def target_pose(state, elapsed, gaze=None):
         values.update(ParamBrowLY=0.55*strength, ParamBrowRY=0.55*strength)
     elif emotion == "tired":
         values.update(ParamBrowLY=-0.2*strength, ParamBrowRY=-0.2*strength, ParamAngleY=-2*strength)
+    elif emotion == "anxious":
+        strength = min(.45, strength)
+        values.update(ParamBrowLY=0.3*strength, ParamBrowRY=0.3*strength,
+                      ParamBrowLAngle=-0.45*strength, ParamBrowRAngle=-0.45*strength,
+                      ParamMouthForm=-0.4*strength, ParamAngleY=-2*strength)
+    elif emotion in {"impatient", "angry"}:
+        strength = min(.45, strength)
+        values.update(ParamBrowLY=-0.3*strength, ParamBrowRY=-0.3*strength,
+                      ParamBrowLAngle=0.5*strength, ParamBrowRAngle=0.5*strength,
+                      ParamMouthForm=-0.45*strength, ParamAngleY=-strength)
+        if emotion == "impatient":
+            values.update(ParamAngleZ=strength, ParamBodyAngleX=.5*strength)
     if gaze:
         x, y = max(-1, min(1, gaze[0])), max(-1, min(1, gaze[1]))
         values.update(ParamEyeBallX=x*0.65, ParamEyeBallY=y*0.5,

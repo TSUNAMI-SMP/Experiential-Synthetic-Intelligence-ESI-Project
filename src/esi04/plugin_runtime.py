@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from esi02.dialogue import Cancellation, Cancelled
 from esi04.environment_life import current_goal, decision_signature, situation_signature
 from esi04.minecraft import action_menu, current_action, decide
-from esi04.plugins import Connection, EnvironmentClient
+from esi04.plugins import MINECRAFT_PAUSED, Connection, EnvironmentClient, plugin_enabled
 
 
 class EnvironmentRuntime:
@@ -93,6 +93,10 @@ class EnvironmentRuntime:
             return super()._handle(name, data)
         operation, values = data
         try:
+            if operation in {"connect", "manual", "options"} and not plugin_enabled(values.get("id", "minecraft.fabric")):
+                self._disconnect_environment()
+                self.session.environment_mode("")
+                raise RuntimeError(MINECRAFT_PAUSED)
             if operation in {"connect", "virtual", "disconnect"}:
                 self._cancel_tools()
                 self.pending_note = None

@@ -283,3 +283,9 @@ def test_new_goal_drops_old_future_steps_but_keeps_late_experience(tmp_path):
             assert session.plugins.learning.episodes[-1]["small_goal"]["purpose"] == "石を掘る"
         finally:
             runtime.stop()
+
+
+@pytest.fixture(autouse=True)
+def exercise_retained_minecraft_code(monkeypatch):
+    # The released app disables this plugin; keep its preserved code regression-tested.
+    monkeypatch.setattr("esi04.plugins.MINECRAFT_ENABLED", True)

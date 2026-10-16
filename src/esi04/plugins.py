@@ -15,6 +15,13 @@ from esi02.world import Model
 from esi04.environment_learning import LifeLearning
 from esi04.environment_life import LifeState
 
+MINECRAFT_ENABLED = False
+MINECRAFT_PAUSED = "Minecraft連携は会話機能の改善のため一時無効化しています。ワールドと保存済みの経験は保持しています。"
+
+
+def plugin_enabled(identifier):
+    return identifier != "minecraft.fabric" or MINECRAFT_ENABLED
+
 
 class PluginManifest(Model):
     api_version: Literal[1] = 1
@@ -194,6 +201,7 @@ class EnvironmentAction(Model):
 
 class PluginState(Model):
     active_id: str = ""
+    suspended_id: str = ""
     autonomous: bool = False
     goal: str = Field(default="", max_length=1000)
     observation: EnvironmentObservation | None = None

@@ -690,3 +690,9 @@ def test_failed_walk_can_still_satisfy_a_real_acquisition_goal(session):
     assert session.plugins.learning.plan.stage == "failed"
     assert goal.stage == "completed" and goal.evidence
     assert session.plugins.learning.episodes[-1]["gains"] == {"minecraft:bread": 1}
+
+
+@pytest.fixture(autouse=True)
+def exercise_retained_minecraft_code(monkeypatch):
+    # The released app disables this plugin; keep its preserved code regression-tested.
+    monkeypatch.setattr("esi04.plugins.MINECRAFT_ENABLED", True)

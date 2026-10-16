@@ -2,11 +2,13 @@
 
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from esi02.world import Model
+from esi03.personality import Character as PreviousCharacter
 from esi03.personality import Preferences as PreviousPreferences
 from esi03.personality import State as PreviousState
+from esi04.affect import Affect, Emotion
 from esi04.computer_models import ScreenTeaching
 from esi04.vision import Observation as ScreenObservation
 
@@ -32,13 +34,32 @@ class Question(Model):
     stage: Literal["pending", "answered", "uncertain", "declined", "deferred", "unobserved", "cancelled"] = "pending"
     reply_turn: str | None = None
     reply_quote: str = Field(default="", max_length=2000)
+    answer_quote: str = Field(default="", max_length=240)
+
+
+class Character(PreviousCharacter):
+    style: Literal["gentle", "casual", "precise"] = "precise"
 
 
 class ExperienceState(PreviousState):
+    character: PreviousCharacter = Field(default_factory=Character)
+    conversation_revision: Literal[2] = 2
     preferences: Preferences = Field(default_factory=Preferences)
     dialogue_questions: list[Question] = Field(default_factory=list, max_length=64)
     availability: Literal["unknown", "present", "busy", "unobserved"] = "unknown"
     question_contexts: dict[str, str] = Field(default_factory=dict, max_length=96)
+
+    @model_validator(mode="before")
+    @classmethod
+    def conversation_defaults(cls, value):
+        if isinstance(value, dict) and "conversation_revision" not in value:
+            value = dict(value)
+            character = dict(value.get("character", {}))
+            if character.get("style", "casual") == "casual":
+                character["style"] = "precise"
+            value["character"] = character
+            value["conversation_revision"] = 2
+        return value
 
 
 class Summary(Model):
@@ -60,8 +81,9 @@ class Cognition(Model):
     attention: str = "相手"
     attention_object: str | None = None
     intention: Literal["listen", "think", "inspect", "ask", "rest", "explore", "operate", "play", "enjoy"] = "listen"
-    emotion: Literal["neutral", "interested", "pleased", "uncertain", "surprised", "tired", "concerned"] = "neutral"
+    emotion: Emotion = "neutral"
     emotion_strength: float = Field(default=0.2, ge=0, le=1)
+    affect: Affect = Field(default_factory=Affect)
     active_object: str | None = None
     object_action: str | None = None
     object_started: float = Field(default=0, ge=0)

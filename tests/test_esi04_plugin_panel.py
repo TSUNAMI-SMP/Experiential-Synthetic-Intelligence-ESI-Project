@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 
+import pytest
 from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import QApplication, QWidget
 from test_esi04_plugins import connected
@@ -54,3 +55,9 @@ def test_plugin_panel_preserves_pending_edits_and_reloads_for_a_different_charac
         first.close()
         second.close()
         app.processEvents()
+
+
+@pytest.fixture(autouse=True)
+def exercise_retained_minecraft_code(monkeypatch):
+    # The released app disables this plugin; keep its preserved code regression-tested.
+    monkeypatch.setattr("esi04.plugins.MINECRAFT_ENABLED", True)

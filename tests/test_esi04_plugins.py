@@ -26,6 +26,7 @@ def observation(**changes):
 
 
 def connected(session):
+    session.experience.semantic_replies = False  # Legacy plugin-only fixtures avoid an actual model call.
     session.environment_mode("minecraft.fabric")
     session.status.update(plugin_connected=True, plugin_session="session")
     session.plugin_observed(observation().model_dump())
@@ -283,3 +284,9 @@ def test_minecraft_conversation_distinguishes_story_from_equipment_request(sessi
             assert not session.plugins.autonomous
     finally:
         runtime.stop()
+
+
+@pytest.fixture(autouse=True)
+def exercise_retained_minecraft_code(monkeypatch):
+    # The released app disables this plugin; keep its preserved code regression-tested.
+    monkeypatch.setattr("esi04.plugins.MINECRAFT_ENABLED", True)

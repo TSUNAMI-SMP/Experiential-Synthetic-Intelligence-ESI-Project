@@ -3,9 +3,27 @@
 from PySide6.QtWidgets import QCheckBox, QFormLayout, QLabel
 
 from esi03.growth_gui import GrowthPanel as PreviousPanel
+from esi04.affect import LABELS
 
 
 class GrowthPanel(PreviousPanel):
+    def _identity(self):
+        super()._identity()
+        self.style.setItemText(self.style.findData("precise"), "丁寧（標準・です／ます）")
+        self.style.setItemText(self.style.findData("gentle"), "やわらかい敬語")
+        self.style.setItemText(self.style.findData("casual"), "親しみのある常体")
+        self.style.setToolTip("通常の会話にも反映します。標準は敬語で、引用内の言葉は変えません。")
+        self.affect_status = QLabel()
+        self.affect_status.setWordWrap(True)
+        self.style.parentWidget().layout().addRow("現在の感情の傾向", self.affect_status)
+        self.style.parentWidget().layout().addRow(QLabel("モデルの一般知識を使って会話します。教わった記憶・観測とは区別します。"))
+
+    def refresh(self):
+        super().refresh()
+        affect = self.controller.session.cognition.affect
+        self.affect_status.setText(" / ".join(f"{label} {getattr(affect, key):.0%}" for key, label in LABELS.items())
+                                  + ("\n"+affect.reason if affect.reason else ""))
+
     def _interests(self):
         super()._interests()
         pane = self.question_interval.parentWidget()

@@ -13,14 +13,15 @@ class Beliefs(PreviousBeliefs):
         if (turn["source"] not in {"text", "microphone", "recording", "confirmed_recognition"}
                 or not turn.get("use_in_dialogue_history", True) or turn.get("recognition_needs_confirmation")):
             return False
-        if (not question.reply_quote or question.reply_quote not in turn["input"]
+        quote = question.answer_quote or question.reply_quote
+        if (not quote or quote not in turn["input"]
                 or question.topic not in question.text or turn["started_elapsed"] < question.asked_at):
             raise ValueError("回答の出典か、質問の対象・時系列を確認できません。")
-        if re.search(r"[？?]|もし|例えば|仮に|という文", question.reply_quote):
+        if re.search(r"[？?]|もし|例えば|仮に|という文", quote):
             return False
         item = Candidate(kind="knowledge", key="knowledge:"+normalize(question.topic[:60]),
-                         label=question.topic[:60], value=question.reply_quote[:120],
-                         quote=question.reply_quote[:500], basis="explicit")
+                         label=question.topic[:60], value=quote[:120],
+                         quote=quote[:500], basis="explicit")
         evidence = {"id": turn["id"], "source": turn["source"], "quote": item.quote,
                     "at": turn["created_at"], "basis": "contextual_answer", "url": None,
                     "question_id": question.id, "question": question.text}

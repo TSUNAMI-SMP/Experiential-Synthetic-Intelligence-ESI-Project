@@ -227,3 +227,32 @@ def test_idle_research_reads_a_real_allowed_folder_and_keeps_its_sources(tmp_pat
     finally:
         runtime.stop()
         session.close()
+
+
+def test_full_owner_links_a_normal_spoken_answer_to_its_generated_question(tmp_path):
+    from test_esi04_conversation import completion, model
+
+    from esi04.dialogue import DialogueLLM
+
+    session=Session(tmp_path/'dialogue.db',Settings(playback=False,idle_deliberation=False))
+    session.character_operation('preferences',{'proactive':True,'exploration':False,'idle_activity':False})
+    session.brain.state.enabled=False
+    factory, requests=model(
+        completion('囲碁がお好きなのですね。',followup='どの一手が印象的でしたか？'),
+        completion('中央の切り込みが印象に残ったのですね。相手の応手を読む場面には面白さがあります。',reply_relation='answered'))
+    runtime=Runtime(session,llm=DialogueLLM(session.settings,factory),tts=FileOnlyVoice(),memory_llm=NoMemoryModel())
+    try:
+        runtime.start()
+        runtime.send('text','今日は友人と囲碁をしました')
+        wait_for(lambda: len(session.turns)==1 and next(reversed(session.turns.values()))['stage']=='complete')
+        question=session.experience.pending_question()
+        assert question and question.text=='どの一手が印象的でしたか？'
+        runtime.send('text','中央の切り込みです')
+        wait_for(lambda: len(session.turns)==2 and next(reversed(session.turns.values()))['stage']=='complete')
+        assert question.stage=='answered' and question.reply_quote=='中央の切り込みです'
+        turn=next(reversed(session.turns.values()))
+        assert '切り込み' in turn['reply'] and turn['chunks']
+        assert len(requests)==2 and not session.status.get('error')
+    finally:
+        runtime.stop()
+        session.close()

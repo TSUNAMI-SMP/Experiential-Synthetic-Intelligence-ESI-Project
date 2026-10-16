@@ -43,6 +43,7 @@ def reply_relation(text, question):
 
 
 class Experience(PreviousExperience):
+    semantic_replies = False  # The session enables semantic binding for normal model dialogue.
     outcome_sources = PreviousExperience.outcome_sources | {"computer_observation", "game_observation"}
     state_class = ExperienceState
     initial_question_delay = 0
@@ -113,16 +114,22 @@ class Experience(PreviousExperience):
         score = benefit*(0.7+0.3*item.priority)-cost
         return {"interest": item, "score": max(0, score), "reason": item.reason} if score > 0 else None
 
-    def link_reply(self, turn):
+    def reply_candidate(self, text):
         question = self.pending_question() or next(
             (q for q in reversed(self.state.dialogue_questions) if q.stage == "unobserved"), None)
         if question is None:
             return None
         if question.stage == "unobserved":
-            text = turn["input"].strip()
+            text = text.strip()
             explicit_return = re.search(r"(?:さっき|前|先ほど)の質問", text)
             if not explicit_return and len(grams(text) & grams(question.topic+question.text)) < 2:
                 return None
+        return question
+
+    def link_reply(self, turn):
+        question = self.reply_candidate(turn["input"])
+        if question is None:
+            return None
         relation = reply_relation(turn["input"], question)
         if question.stage == "uncertain" and YES.fullmatch(turn["input"].strip()):
             return {"question_id": question.id, "relation": "answered", "quote": question.reply_quote,
@@ -130,6 +137,10 @@ class Experience(PreviousExperience):
         if question.stage == "uncertain" and NO.fullmatch(turn["input"].strip()):
             return {"question_id": question.id, "relation": "clarification_rejected", "quote": turn["input"],
                     "source_turn": turn["id"]}
+        if self.semantic_replies and relation not in {"deferred", "declined"}:
+            # Shared characters and YES are hints, not sufficient semantic evidence.
+            return {"question_id": question.id, "relation": "other", "quote": turn["input"],
+                    "source_turn": turn["id"], "needs_semantic": True}
         return {"question_id": question.id, "relation": relation, "quote": turn["input"],
                 "source_turn": turn["id"]}
 
@@ -143,11 +154,13 @@ class Experience(PreviousExperience):
         if stage == "clarification_rejected":
             question.stage = "pending"
             question.reply_turn, question.reply_quote = None, ""
+            question.answer_quote = ""
             self.trace("question_reply", "別の発言として受け取り、質問への回答にはしなかった", turn["id"],
                        question_id=question.id, relation=stage)
             return question
         question.stage = stage
         question.reply_turn, question.reply_quote = relation["source_turn"], relation["quote"]
+        question.answer_quote = relation.get("answer_quote", "")
         interest = next((i for i in self.state.interests if i.id == question.interest_id), None)
         if interest and stage != "uncertain":
             interest.stage = "resolved" if stage == "answered" else "paused"

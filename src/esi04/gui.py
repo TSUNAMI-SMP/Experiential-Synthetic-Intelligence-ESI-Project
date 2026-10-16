@@ -20,7 +20,7 @@ from esi04.world_gui import WorldPanel
 
 class Window(PreviousWindow):
     release_name = "ESI-04"
-    heading_text = f"ESI-04 {__version__}  |  見て、試して、自分で活動を選ぶ"
+    heading_text = f"ESI-04 {__version__}  |  知識を使い、対話し、自分の考えを伝える"
     window_title = "ESI-04 — 会話・空間・画面・PC操作"
     desktop_filename = "esi04-desktop.json"
     growth_panel_class = GrowthPanel
@@ -51,7 +51,7 @@ class Window(PreviousWindow):
         self.plugin_scroll = QScrollArea()
         self.plugin_scroll.setWidgetResizable(True)
         self.plugin_scroll.setWidget(self.plugin_panel)
-        self.tabs.addTab(self.plugin_scroll, "プラグイン・Minecraft")
+        self.tabs.addTab(self.plugin_scroll, "プラグイン（Minecraft停止中）")
         self.history_panel = HistoryPanel(self)
         self.tabs.addTab(self.history_panel, "会話履歴・セーブ")
         self.tabs.currentChanged.connect(lambda index: self.history_panel.reload()
